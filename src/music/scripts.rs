@@ -173,31 +173,41 @@ pub fn playlist_ref(id: &str) -> String {
     format!("(first playlist whose persistent ID is {})", quote(id))
 }
 
-/// Wait (up to 5 s) until Music has actually started playing, plus a short
-/// moment more. Found by testing: a `next track` or `set player position`
-/// sent before playback is under way is silently ignored, and an Apple Music
-/// playlist (streamed) takes much longer to start than songs on your Mac,
-/// so a fixed pause isn't enough.
-const WAIT_FOR_PLAYBACK: &str = "    repeat 50 times
-        if player state is playing then exit repeat
+/// Wait (up to 5 s) until Music is really playing *from `target`* (an
+/// AppleScript variable holding a playlist), then a moment more.
+///
+/// Found by testing: commands sent before playback is under way are silently
+/// ignored, and an Apple Music playlist (streamed) takes much longer to start
+/// than songs on your Mac, so a fixed pause isn't enough. Found later: after
+/// `play`, Music keeps playing the *old* song for up to a second (longer
+/// with Bluetooth headphones), so "is it playing?" alone answers yes too
+/// early. That's why we `stop` first and also check *which* playlist plays.
+fn wait_for_playback(target: &str) -> String {
+    format!(
+        "    repeat 50 times
+        try
+            if player state is playing and (persistent ID of current playlist) is (persistent ID of {target}) then exit repeat
+        end try
         delay 0.1
     end repeat
     delay 0.3
-";
+"
+    )
+}
 
 /// Play a saved playlist starting at song `index` (1 = first).
 ///
 /// Found by testing (M3): `play track 3 of playlist P` plays that one song
 /// *outside* the playlist, so "next" then wanders off elsewhere. Playing the
 /// playlist itself keeps "next" inside it. So we start the playlist and
-/// skip forward once playback has really started (`WAIT_FOR_PLAYBACK`).
+/// skip forward once playback has really started (`wait_for_playback`).
 pub fn play_playlist_at(id: &str, index: usize) -> String {
     let mut s = format!(
-        "tell application \"Music\"\n    play {}\n",
+        "tell application \"Music\"\n    set playTarget to {}\n    stop\n    play playTarget\n",
         playlist_ref(id)
     );
     if index > 1 {
-        s.push_str(WAIT_FOR_PLAYBACK);
+        s.push_str(&wait_for_playback("playTarget"));
         s.push_str(&format!(
             "    repeat {} times\n        next track\n    end repeat\n",
             index - 1
@@ -285,11 +295,13 @@ pub fn replace_queue(
     let mut s = String::from(QUEUE_PRELUDE);
     s.push_str(&QUEUE_APPEND.replace("{SOURCE}", &source_lookup(source)));
     if play {
-        s.push_str("    play q\n");
+        // Wait even when there's nothing more to do, so the caller (and the
+        // next status poll) sees the new song, not the old one.
+        s.push_str("    stop\n    play q\n");
+        s.push_str(&wait_for_playback("q"));
         if let Some((pos, paused)) = resume_at {
             // `{:.1}` = one decimal place, always written with a "." which is
             // what AppleScript *source code* expects (whatever your region).
-            s.push_str(WAIT_FOR_PLAYBACK);
             s.push_str(&format!("    set player position to {pos:.1}\n"));
             if paused {
                 s.push_str("    pause\n");
@@ -463,8 +475,10 @@ mod tests {
     #[test]
     fn playing_a_playlist_from_song_3_skips_twice_after_a_pause() {
         let s = play_playlist_at("ABC", 3);
-        assert!(s.contains("play (first playlist whose persistent ID is \"ABC\")"));
-        assert!(s.contains("if player state is playing then exit repeat"));
+        assert!(s.contains("set playTarget to (first playlist whose persistent ID is \"ABC\")"));
+        // Stop the old song first, then wait for *this* playlist to play.
+        assert!(s.contains("stop\n    play playTarget"));
+        assert!(s.contains("(persistent ID of current playlist) is (persistent ID of playTarget)"));
         assert!(s.contains("repeat 2 times"));
         assert!(
             !play_playlist_at("ABC", 1).contains("repeat"),
