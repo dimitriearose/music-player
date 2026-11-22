@@ -13,6 +13,7 @@
 mod app;
 mod art;
 mod check;
+mod config;
 mod library;
 mod music;
 mod popup;
@@ -40,8 +41,14 @@ fn main() -> anyhow::Result<()> {
     // `am --check` runs a read-only self-test instead of the full-screen app.
     // `std::env::args()` is the list of words typed after the program name
     // (`nth(1)` = the first one).
-    if std::env::args().nth(1).as_deref() == Some("--check") {
-        return check::run();
+    match std::env::args().nth(1).as_deref() {
+        Some("--check") => return check::run(),
+        Some("--config") => {
+            config::print();
+            return Ok(());
+        }
+        Some("--init-config") => return config::init(),
+        _ => {}
     }
 
     let (commands, updates) = worker::spawn(music::Music::new());
@@ -67,6 +74,7 @@ fn run(
 ) -> anyhow::Result<()> {
     let mut app = App::new(Instant::now());
     app.truecolor = art::truecolor_supported();
+    app.use_config(&config::load(), Instant::now());
 
     while !app.should_quit {
         // 1. Apply everything the worker has sent since last time.

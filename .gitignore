@@ -19,6 +19,11 @@
 .env.*
 !.env.example
 
+# Personal settings. am reads them from ~/.config/am/config.toml, never from
+# here, but if a copy is ever made in the project it stays out of git.
+# (config.example.toml, with made-up names, is the shared template.)
+/config.toml
+
 # Logs and temp files: these could contain your song/playlist names
 *.log
 *.tmp

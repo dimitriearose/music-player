@@ -18,6 +18,7 @@ const KEYS: &[(&str, &str)] = &[
     ("S", "shuffle your whole library"),
     ("s", "Music's shuffle on / off"),
     ("r", "repeat: off → all → one"),
+    ("1–9", "play a favorite playlist"),
     ("/", "library: search, browse, queue, speakers"),
     ("a", "album art on / off"),
     ("o", "open Music (if closed)"),

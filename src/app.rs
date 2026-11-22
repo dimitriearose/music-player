@@ -17,10 +17,6 @@ use std::time::{Duration, Instant};
 const MESSAGE_TTL: Duration = Duration::from_secs(4);
 /// After this long with no reply, hint that a permission prompt may be waiting.
 const SLOW_START: Duration = Duration::from_secs(2);
-/// Seconds moved by one press of ← / →.
-pub const SEEK_STEP: i32 = 5;
-/// Volume change for one press of + / -.
-pub const VOLUME_STEP: i32 = 5;
 
 /// Are we talking to Music.app, and if not, why not?
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +61,12 @@ pub struct App {
     pub show_art: bool,
     /// Can the terminal show exact colours? (See `art::truecolor_supported`.)
     pub truecolor: bool,
+    /// Seconds moved by one press of ← / → (settings: `seek_seconds`).
+    pub seek_step: i32,
+    /// Volume change for one press of + / - (settings: `volume_step`).
+    pub volume_step: i32,
+    /// Playlist names to pin to the top (settings: `favorites`).
+    pub favorites: Vec<String>,
 }
 
 impl App {
@@ -88,6 +90,9 @@ impl App {
             art: None,
             show_art: true,
             truecolor: false,
+            seek_step: 5,
+            volume_step: 5,
+            favorites: Vec::new(),
         }
     }
 
@@ -114,6 +119,19 @@ impl App {
     }
 
     /// Put a short notice on the bottom line.
+    /// Take on your settings (see `config.rs`), and show the first problem
+    /// with them, if any, on the bottom line.
+    pub fn use_config(&mut self, loaded: &crate::config::Loaded, now: Instant) {
+        let c = &loaded.config;
+        self.show_art = c.show_art;
+        self.seek_step = c.seek_seconds as i32;
+        self.volume_step = c.volume_step as i32;
+        self.favorites = c.favorites.clone();
+        if let Some(problem) = loaded.problems.first() {
+            self.notice(&format!("{problem} (see am --config)"), now);
+        }
+    }
+
     fn notice(&mut self, text: &str, now: Instant) {
         self.message = Some((text.to_string(), now));
     }
@@ -198,17 +216,31 @@ impl App {
             KeyCode::Char(' ') => Some(Command::PlayPause),
             KeyCode::Char('n') => Some(Command::Next),
             KeyCode::Char('p') => Some(Command::Previous),
-            KeyCode::Left | KeyCode::Char('h') => Some(Command::Seek(-SEEK_STEP)),
-            KeyCode::Right | KeyCode::Char('l') => Some(Command::Seek(SEEK_STEP)),
+            KeyCode::Left | KeyCode::Char('h') => Some(Command::Seek(-self.seek_step)),
+            KeyCode::Right | KeyCode::Char('l') => Some(Command::Seek(self.seek_step)),
             // `=` is accepted too, so you don't need Shift for "+".
             KeyCode::Char('+') | KeyCode::Char('=') => Some(Command::SetVolume(
-                (volume + VOLUME_STEP).clamp(0, 100) as u8,
+                (volume + self.volume_step).clamp(0, 100) as u8,
             )),
             KeyCode::Char('-') | KeyCode::Char('_') => Some(Command::SetVolume(
-                (volume - VOLUME_STEP).clamp(0, 100) as u8,
+                (volume - self.volume_step).clamp(0, 100) as u8,
             )),
             KeyCode::Char('s') => Some(Command::ToggleShuffle),
             KeyCode::Char('r') => Some(Command::CycleRepeat),
+            // 1–9: play that favorite playlist from the top.
+            // `c @ '1'..='9'` matches any digit 1–9 and names it `c`.
+            KeyCode::Char(c @ '1'..='9') => {
+                let n = c as usize - '0' as usize;
+                let id = self
+                    .library
+                    .as_ref()
+                    .filter(|lib| n <= lib.favorites)
+                    .map(|lib| lib.playlists[n - 1].id.clone());
+                if id.is_none() {
+                    self.notice(&format!("No favorite {n} (see am --config)"), now);
+                }
+                id.map(|id| Command::PlayPlaylist { id, index: 1 })
+            }
             _ => None,
         }
     }
@@ -279,7 +311,13 @@ impl App {
             }
             Update::Error(e) => self.message = Some((e.to_string(), now)),
             Update::Notice(text) => self.notice(&text, now),
-            Update::Library(lib) => self.library = Some(lib),
+            Update::Library(mut lib) => {
+                let missing = lib.pin(&self.favorites);
+                if !missing.is_empty() {
+                    self.notice(&format!("No playlist called: {}", missing.join(", ")), now);
+                }
+                self.library = Some(lib);
+            }
             Update::PlaylistSongs { id, songs } => {
                 self.playlist_songs.insert(id, songs);
             }
@@ -919,6 +957,74 @@ mod tests {
                 ids: vec!["A1".into()],
                 source: None,
             })
+        );
+    }
+
+    fn app_with_favorites(now: Instant) -> App {
+        let mut app = connected_app(now);
+        app.favorites = vec!["Lo-Fi Japan".into(), "ease".into(), "gone".into()];
+        let p = |id: &str, name: &str| crate::music::Playlist {
+            id: id.into(),
+            name: name.into(),
+            apple_music: false,
+        };
+        app.apply(
+            Update::Library(Library::new(
+                vec![],
+                vec![p("E1", "ease"), p("L2", "Lo-Fi Japan"), p("X3", "Other")],
+            )),
+            now,
+        );
+        app
+    }
+
+    #[test]
+    fn favorites_are_pinned_and_typos_reported() {
+        let now = Instant::now();
+        let app = app_with_favorites(now);
+        let lib = app.library.as_ref().unwrap();
+        let names: Vec<&str> = lib.playlists.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Lo-Fi Japan", "ease", "Other"]);
+        assert_eq!(app.message(now), Some("No playlist called: gone"));
+    }
+
+    #[test]
+    fn number_keys_play_favorites() {
+        let now = Instant::now();
+        let mut app = app_with_favorites(now);
+        assert_eq!(
+            app.handle_key(key('2'), now),
+            Some(Command::PlayPlaylist {
+                id: "E1".into(),
+                index: 1
+            })
+        );
+        assert_eq!(app.handle_key(key('3'), now), None, "only 2 favorites");
+        assert_eq!(app.message(now), Some("No favorite 3 (see am --config)"));
+    }
+
+    #[test]
+    fn settings_change_steps_and_art() {
+        let now = Instant::now();
+        let mut app = connected_app(now);
+        let loaded = crate::config::Loaded {
+            config: crate::config::Config {
+                favorites: vec![],
+                show_art: false,
+                seek_seconds: 15,
+                volume_step: 10,
+            },
+            path: None,
+            file_found: false,
+            problems: vec![],
+        };
+        app.use_config(&loaded, now);
+        assert!(!app.show_art);
+        assert_eq!(app.handle_key(key('l'), now), Some(Command::Seek(15)));
+        let vol = app.status.as_ref().unwrap().volume;
+        assert_eq!(
+            app.handle_key(key('-'), now),
+            Some(Command::SetVolume(vol - 10))
         );
     }
 

@@ -128,11 +128,12 @@ can press `o` to reopen it.
 |---|---|
 | `space` | play / pause |
 | `n` / `p` | next / previous track |
-| `←` `→` or `h` `l` | seek back / forward 5 seconds |
-| `+` / `-` | volume up / down by 5 (`=` works for `+` too, no Shift needed) |
+| `←` `→` or `h` `l` | seek back / forward 5 seconds (changeable in Settings) |
+| `+` / `-` | volume up / down by 5, changeable in Settings (`=` works for `+` too, no Shift needed) |
 | `S` (Shift-S) | **shuffle your whole library** (200 random songs) |
 | `s` | Music's own shuffle on / off |
 | `r` | repeat: off → all → one → off |
+| `1`–`9` | play your 1st–9th favorite playlist (see [Settings](#settings-and-favorites)) |
 | `/` | open the library pop-up |
 | `a` | album art on / off |
 | `?` | show / hide this list on screen (`Esc` closes it) |
@@ -196,6 +197,76 @@ show them exactly.
 
 ---
 
+## Settings and favorites
+
+`am` works with no settings at all. To change things, make a settings file:
+
+```bash
+am --init-config
+```
+
+This creates `~/.config/am/config.toml` (`~` is your home folder) from
+[`config.example.toml`](config.example.toml). It never overwrites a file
+that's already there. Open it in any editor:
+
+```bash
+open -e ~/.config/am/config.toml
+```
+
+```toml
+favorites = ["Morning Run", "Focus"]   # pinned to the top of Playlists, marked ★
+show_art = true                        # album art on when am starts
+seek_seconds = 5                       # ← / → jump
+volume_step = 5                        # + / - change
+```
+
+**Favorites** sit at the top of the Playlists tab, in the order you list
+them. On the main screen, keys `1`–`9` play the 1st–9th favorite. Names
+ignore capitals. If a name doesn't match any playlist, `am` says so on the
+bottom line.
+
+Restart `am` after editing. To check what's in use and where the file is:
+
+```bash
+am --config
+```
+
+**Environment variables** override the file, one setting at a time. Handy
+for a one-off try, or if you'd rather keep settings in `~/.zshrc`:
+
+| Variable | Example |
+|---|---|
+| `AM_FAVORITES` | `AM_FAVORITES="Morning Run, Focus"` (comma-separated) |
+| `AM_SHOW_ART` | `AM_SHOW_ART=false` |
+| `AM_SEEK_SECONDS` | `AM_SEEK_SECONDS=10` |
+| `AM_VOLUME_STEP` | `AM_VOLUME_STEP=10` |
+| `AM_CONFIG` | read the settings file from somewhere else |
+
+```bash
+AM_FAVORITES="Focus" am
+```
+
+The line above runs `am` once with that one setting. It doesn't change the file.
+
+**Why not a `.env` file in the project?** `am` runs from any folder once
+installed, so a `.env` next to the code would never be found. Your settings
+also stay out of the repository, so your playlist names never reach GitHub.
+
+**On another Mac:** install `am` (see [Setup](#setup)), then copy your one
+file across, for example with AirDrop, or from the terminal:
+
+```bash
+scp ~/.config/am/config.toml other-mac.local:.config/am/config.toml
+```
+
+`scp` copies a file to another computer over SSH. That needs **Remote
+Login** turned on in that Mac's System Settings → General → Sharing, and the
+`.config/am` folder must already exist there (`mkdir -p ~/.config/am` on the
+other Mac creates it). Favorites are matched by name, so they work anywhere
+your playlists have the same names.
+
+---
+
 ## How it works (short version)
 
 - `am` talks to Music.app with **AppleScript**, by running the built-in
@@ -242,6 +313,8 @@ src/
 ├── art.rs               album art → coloured text blocks (has tests)
 ├── worker.rs            the background thread that talks to Music
 ├── check.rs             `am --check`
+├── config.rs            settings file + AM_* environment variables (has tests)
+├── shuffle.rs           shuffling a song list for `S` (has tests)
 ├── music/
 │   ├── mod.rs           the types: Track, Song, PlayerStatus, MusicError…
 │   ├── scripts.rs       every AppleScript, in one place

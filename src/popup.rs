@@ -183,6 +183,7 @@ const ICON_SONG: &str = "♪";
 const ICON_ALBUM: &str = "◉";
 const ICON_ARTIST: &str = "◆";
 const ICON_PLAYLIST: &str = "≡";
+const ICON_FAVORITE: &str = "★";
 
 /// The rows to show for the pop-up's current tab and view.
 pub fn rows(popup: &Popup, data: &Data) -> Vec<Row> {
@@ -205,7 +206,11 @@ pub fn rows(popup: &Popup, data: &Data) -> Vec<Row> {
         },
         View::List => match popup.tab {
             Tab::Search => search_rows(lib, &popup.query),
-            Tab::Playlists => lib.playlists.iter().map(playlist_row).collect(),
+            Tab::Playlists => lib
+                .playlists
+                .iter()
+                .map(|p| playlist_row(p, lib.favorite_number(&p.id)))
+                .collect(),
             Tab::Albums => lib.albums.iter().map(album_row).collect(),
             Tab::Artists => lib.artists.iter().map(|a| artist_row(a)).collect(),
             Tab::Queue | Tab::Speakers => unreachable!("handled above"),
@@ -260,16 +265,26 @@ fn playlist_rows(id: &str, songs: &[Song]) -> Vec<Row> {
         .collect()
 }
 
-fn playlist_row(p: &crate::music::Playlist) -> Row {
+/// `favorite`: its number if it's one of your favorites (shown with a ★ and,
+/// for 1–9, the key that plays it from the main screen).
+fn playlist_row(p: &crate::music::Playlist, favorite: Option<usize>) -> Row {
+    // Grey details: "key 2", "Apple Music" (so two "Favorite Songs" can be
+    // told apart), or both.
+    let mut detail = Vec::new();
+    if let Some(n) = favorite.filter(|n| *n <= 9) {
+        detail.push(format!("key {n}"));
+    }
+    if p.apple_music {
+        detail.push("Apple Music".to_string());
+    }
     Row {
-        icon: ICON_PLAYLIST,
-        label: p.name.clone(),
-        // Grey "Apple Music" tag, so two "Favorite Songs" can be told apart.
-        detail: if p.apple_music {
-            "Apple Music".into()
+        icon: if favorite.is_some() {
+            ICON_FAVORITE
         } else {
-            String::new()
+            ICON_PLAYLIST
         },
+        label: p.name.clone(),
+        detail: detail.join(" · "),
         action: Action::Open(View::Playlist {
             id: p.id.clone(),
             name: p.name.clone(),
@@ -327,7 +342,7 @@ fn search_rows(lib: &Library, query: &str) -> Vec<Row> {
         .map(|hit| match hit {
             Hit::Artist(name) => artist_row(name),
             Hit::Album(a) => album_row(a),
-            Hit::Playlist(p) => playlist_row(p),
+            Hit::Playlist(p) => playlist_row(p, lib.favorite_number(&p.id)),
             Hit::Song(s) => {
                 song_index += 1;
                 Row {

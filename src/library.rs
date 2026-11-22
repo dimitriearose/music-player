@@ -21,6 +21,8 @@ pub struct AlbumKey {
 pub struct Library {
     pub songs: Vec<Song>,
     pub playlists: Vec<Playlist>,
+    /// How many of `playlists` (at the front) are favorites (see `pin`).
+    pub favorites: usize,
     /// Worked out from `songs` once, when the library is built.
     pub albums: Vec<AlbumKey>,
     pub artists: Vec<String>,
@@ -81,9 +83,45 @@ impl Library {
         Library {
             songs,
             playlists,
+            favorites: 0,
             albums,
             artists,
         }
+    }
+
+    /// Move the playlists named in `names` (your favorites, from the
+    /// settings file) to the front, in that order. Names match ignoring
+    /// capitals; if several playlists share a name, all of them move.
+    /// Returns the names that matched nothing, so typos can be reported.
+    pub fn pin(&mut self, names: &[String]) -> Vec<String> {
+        // `std::mem::take` moves the list out, leaving an empty one behind,
+        // so we can split it without copying every playlist.
+        let mut rest = std::mem::take(&mut self.playlists);
+        let mut pinned = Vec::new();
+        let mut missing = Vec::new();
+        for name in names {
+            let wanted = fold(name);
+            // `partition` splits a list in two by a yes/no test.
+            let (hits, others): (Vec<Playlist>, Vec<Playlist>) =
+                rest.into_iter().partition(|p| fold(&p.name) == wanted);
+            rest = others;
+            if hits.is_empty() && !pinned.iter().any(|p: &Playlist| fold(&p.name) == wanted) {
+                missing.push(name.clone());
+            }
+            pinned.extend(hits);
+        }
+        self.favorites = pinned.len();
+        pinned.extend(rest);
+        self.playlists = pinned;
+        missing
+    }
+
+    /// Favorite number (1 = first) of a playlist, if it is one.
+    pub fn favorite_number(&self, id: &str) -> Option<usize> {
+        self.playlists[..self.favorites]
+            .iter()
+            .position(|p| p.id == id)
+            .map(|i| i + 1)
     }
 
     /// An album's songs in disc/track order.
@@ -235,6 +273,40 @@ mod tests {
         );
         let names: Vec<&str> = lib.playlists.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Ease", "ital", "Abc", "Beats"]);
+    }
+
+    #[test]
+    fn favorites_move_to_the_front_in_the_order_given() {
+        let p = |id: &str, name: &str, apple_music| Playlist {
+            id: id.into(),
+            name: name.into(),
+            apple_music,
+        };
+        let mut lib = Library::new(
+            vec![],
+            vec![
+                p("1", "Beats", true),
+                p("2", "ease", false),
+                p("3", "Lo-Fi Japan", true),
+                p("4", "Liked", false),
+                p("5", "Liked", true),
+            ],
+        );
+        let missing = lib.pin(&[
+            "lo-fi japan".into(),
+            "EASE".into(),
+            "liked".into(),
+            "nope".into(),
+        ]);
+        let ids: Vec<&str> = lib.playlists.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["3", "2", "4", "5", "1"]);
+        assert_eq!(lib.favorites, 4, "both playlists called Liked are pinned");
+        assert_eq!(missing, ["nope"]);
+        assert_eq!(lib.favorite_number("2"), Some(2));
+        assert_eq!(lib.favorite_number("1"), None);
+        // Pinning again (after a library reload) starts fresh.
+        lib.pin(&[]);
+        assert_eq!(lib.favorites, 0);
     }
 
     #[test]

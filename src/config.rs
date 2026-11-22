@@ -130,11 +130,20 @@ fn build(file: Option<&str>, env: impl Fn(&str) -> Option<String>) -> (Config, V
     // Keep numbers sensible rather than refusing to start.
     let clamp = |value: &mut u32, min, max, what: &str, problems: &mut Vec<String>| {
         if !(min..=max).contains(value) {
-            problems.push(format!("{what} must be {min}–{max}; using {}", (*value).clamp(min, max)));
+            problems.push(format!(
+                "{what} must be {min}–{max}; using {}",
+                (*value).clamp(min, max)
+            ));
             *value = (*value).clamp(min, max);
         }
     };
-    clamp(&mut config.seek_seconds, 1, 60, "seek_seconds", &mut problems);
+    clamp(
+        &mut config.seek_seconds,
+        1,
+        60,
+        "seek_seconds",
+        &mut problems,
+    );
     clamp(&mut config.volume_step, 1, 25, "volume_step", &mut problems);
 
     (config, problems)
@@ -188,7 +197,12 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        move |name| pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+        move |name| {
+            pairs
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+        }
     }
 
     #[test]
@@ -215,7 +229,10 @@ mod tests {
         assert!(problems.is_empty());
         assert_eq!(c.favorites, ["x", "y"]);
         assert!(!c.show_art);
-        assert_eq!(c.seek_seconds, 10, "file value kept when env doesn't set it");
+        assert_eq!(
+            c.seek_seconds, 10,
+            "file value kept when env doesn't set it"
+        );
     }
 
     #[test]
@@ -224,10 +241,7 @@ mod tests {
         assert_eq!(c, Config::default());
         assert!(problems[0].contains("favourites"), "{problems:?}");
 
-        let (c, problems) = build(
-            Some("volume_step = 99"),
-            env(&[("AM_SEEK_SECONDS", "ten")]),
-        );
+        let (c, problems) = build(Some("volume_step = 99"), env(&[("AM_SEEK_SECONDS", "ten")]));
         assert_eq!(c.volume_step, 25);
         assert_eq!(problems.len(), 2);
     }
