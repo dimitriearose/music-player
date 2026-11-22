@@ -48,7 +48,14 @@ fn main() {
     let lib = library::Library::new(songs, playlists);
     let ids: Vec<String> = lib.songs.iter().take(5).map(|s| s.id.clone()).collect();
     let _ = music::osascript::run("tell application \"Music\" to stop");
-    music::osascript::run(&music::scripts::replace_queue(&[], None, false, None)).unwrap();
+    music::osascript::run(&music::scripts::replace_queue(
+        &[],
+        None,
+        false,
+        None,
+        Some(false),
+    ))
+    .unwrap();
 
     // Queue while stopped, then start it from the Queue tab (play_queue_at).
     check(
@@ -133,12 +140,13 @@ fn main() {
             .iter()
             .map(|s| s.id.clone())
             .collect();
-        m.play_songs(&a, 2, None).unwrap();
+        m.play_songs(&a, 2, None, Some(false)).unwrap();
         wait();
         check(
             "play album from track 2",
             now_id(&m).as_ref() == Some(&a[1]),
         );
+        check("…not marked as shuffled", !status(&m).queue_shuffled);
         m.next().unwrap();
         wait();
         check("next → album track 3", now_id(&m).as_ref() == Some(&a[2]));
@@ -155,7 +163,7 @@ fn main() {
             .collect();
         if ps.len() >= 3 {
             shuffle::shuffle(&mut ps, shuffle::seed());
-            m.play_songs(&ps, 1, Some(&p.id)).unwrap();
+            m.play_songs(&ps, 1, Some(&p.id), Some(true)).unwrap();
             wait();
             check(
                 "shuffled Apple Music playlist starts at our first pick",
@@ -167,6 +175,14 @@ fn main() {
                 &format!("shuffled queue holds {want} songs in our order"),
                 q.len() == want && q[..] == ps[..want],
             );
+            check(
+                "status says the queue is shuffled",
+                status(&m).queue_shuffled,
+            );
+            // Adding a song keeps it marked as shuffled (the queue is rebuilt).
+            m.enqueue(&ids[..1], true, None).unwrap();
+            wait();
+            check("…and still after 'play next'", status(&m).queue_shuffled);
         }
     }
 
@@ -250,7 +266,14 @@ fn main() {
             .collect();
         if outside.len() == 2 {
             let _ = music::osascript::run("tell application \"Music\" to stop");
-            music::osascript::run(&music::scripts::replace_queue(&[], None, false, None)).unwrap();
+            music::osascript::run(&music::scripts::replace_queue(
+                &[],
+                None,
+                false,
+                None,
+                Some(false),
+            ))
+            .unwrap();
             m.enqueue(&outside, false, Some(&p.id)).unwrap();
             m.enqueue(&ids[..1], false, None).unwrap(); // rebuild without the source
             let q: Vec<String> = m.queue().unwrap().songs.into_iter().map(|s| s.id).collect();
@@ -290,7 +313,14 @@ fn main() {
 
     // Leave things as we found them.
     let _ = music::osascript::run("tell application \"Music\" to stop");
-    music::osascript::run(&music::scripts::replace_queue(&[], None, false, None)).unwrap();
+    music::osascript::run(&music::scripts::replace_queue(
+        &[],
+        None,
+        false,
+        None,
+        Some(false),
+    ))
+    .unwrap();
     m.set_volume(original_volume).unwrap();
     check(
         &format!("stopped, queue emptied, volume back to {original_volume}"),

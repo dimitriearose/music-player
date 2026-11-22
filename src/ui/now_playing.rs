@@ -56,6 +56,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         status.state,
         status.volume,
         status.shuffle,
+        status.queue_shuffled,
         status.repeat,
     ));
 
@@ -112,14 +113,25 @@ fn bar_parts(pos: f64, duration: f64, width: usize) -> (usize, usize) {
 }
 
 /// "▶ playing   vol 60   ⤮ shuffle   ↻ all". Shuffle and repeat are
-/// only shown when they're on, to keep the line quiet.
-fn state_line(state: PlayState, volume: u8, shuffle: bool, repeat: Repeat) -> Line<'static> {
+/// only shown when they're on, to keep the line quiet. "⤮ shuffled queue"
+/// means `am` shuffled the songs (the `S` key); "⤮ shuffle" is Music's own
+/// setting (the `s` key). They're different things, so they're named apart.
+fn state_line(
+    state: PlayState,
+    volume: u8,
+    shuffle: bool,
+    queue_shuffled: bool,
+    repeat: Repeat,
+) -> Line<'static> {
     let state = match state {
         PlayState::Playing => "▶ playing",
         PlayState::Paused => "⏸ paused",
         PlayState::Stopped => "■ stopped",
     };
     let mut parts = vec![state.to_string(), format!("vol {volume}")];
+    if queue_shuffled {
+        parts.push("⤮ shuffled queue".into());
+    }
     if shuffle {
         parts.push("⤮ shuffle".into());
     }
@@ -167,9 +179,11 @@ mod tests {
 
     #[test]
     fn state_line_hides_settings_that_are_off() {
-        let quiet = state_line(PlayState::Paused, 40, false, Repeat::Off).to_string();
+        let quiet = state_line(PlayState::Paused, 40, false, false, Repeat::Off).to_string();
         assert_eq!(quiet, "⏸ paused   vol 40");
-        let busy = state_line(PlayState::Playing, 60, true, Repeat::All).to_string();
+        let busy = state_line(PlayState::Playing, 60, true, false, Repeat::All).to_string();
         assert_eq!(busy, "▶ playing   vol 60   ⤮ shuffle   ↻ all");
+        let ours = state_line(PlayState::Playing, 60, false, true, Repeat::Off).to_string();
+        assert_eq!(ours, "▶ playing   vol 60   ⤮ shuffled queue");
     }
 }

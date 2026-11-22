@@ -130,8 +130,8 @@ can press `o` to reopen it.
 | `n` / `p` | next / previous track |
 | `←` `→` or `h` `l` | seek back / forward 5 seconds (changeable in Settings) |
 | `+` / `-` | volume up / down by 5, changeable in Settings (`=` works for `+` too, no Shift needed) |
-| `S` (Shift-S) | **shuffle your whole library** (200 random songs) |
-| `s` | Music's own shuffle on / off |
+| `S` (Shift-S) | **shuffle your whole library** (200 random songs). The status line shows `⤮ shuffled queue` |
+| `s` | Music's own shuffle on / off. The status line shows `⤮ shuffle` |
 | `r` | repeat: off → all → one → off |
 | `1`–`9` | play your 1st–9th favorite playlist (see [Settings](#settings-and-favorites)) |
 | `/` | open the library pop-up |

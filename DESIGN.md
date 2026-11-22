@@ -331,3 +331,9 @@ Measured on a 1,583-song library:
    shuffles the song list itself (`src/shuffle.rs`) and plays it through the
    queue, so the Queue tab shows the real order. `s` still toggles Music's
    own shuffle.
+11. **Knowing the queue is shuffled.** `am` writes `am:shuffled` into the
+   queue playlist's description, and the status script reads it back, so
+   the status line shows `⤮ shuffled queue` even after `am` restarts. The
+   mark is kept when songs are added to a shuffled queue. Found by testing:
+   `set description of q to (description of old)` fails in one step, so the
+   old value is read into a variable first.

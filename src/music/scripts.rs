@@ -22,7 +22,13 @@ set US to character id 31
 tell application "Music"
     -- (Variable names avoid `st`, which AppleScript reserves for "1st".)
     set pstate to player state as text
-    set base to pstate & US & (sound volume) & US & (shuffle enabled) & US & (song repeat as text)
+    -- Is the song coming from am's queue, shuffled by am (the `S` key)?
+    -- `replace_queue` writes the mark into the queue's description.
+    set qshuf to false
+    try
+        if (name of current playlist) is "am · Queue" and (description of current playlist) is "am:shuffled" then set qshuf to true
+    end try
+    set base to pstate & US & (sound volume) & US & (shuffle enabled) & US & (song repeat as text) & US & qshuf
     if pstate is "stopped" then return base
     try
         set t to current track
@@ -217,6 +223,11 @@ pub fn play_playlist_at(id: &str, index: usize) -> String {
     s
 }
 
+/// Written into the queue playlist's description when `am` shuffled it, so
+/// the status line can say so (`STATUS` reads it back). Stored in Music
+/// rather than in `am`, so it's still known after you restart `am`.
+pub const SHUFFLE_MARK: &str = "am:shuffled";
+
 /// While the queue is rebuilt, the previous one is kept under this name so
 /// its songs can be copied across, then deleted.
 pub const OLD_QUEUE_NAME: &str = "am · Queue (old)";
@@ -227,12 +238,16 @@ const QUEUE_PRELUDE: &str = r#"
 tell application "Music"
     if exists user playlist {OLDNAME} then delete user playlist {OLDNAME}
     set old to missing value
+    set oldMark to missing value
     if exists user playlist {QNAME} then
         set old to user playlist {QNAME}
+        try
+            set oldMark to description of old
+        end try
         set name of old to {OLDNAME}
     end if
     set q to make new user playlist with properties {name:{QNAME}}
-"#;
+{MARK}"#;
 
 /// Copy the songs with these IDs, in order, into `q`, then delete `old`.
 ///
@@ -286,13 +301,27 @@ fn source_lookup(source: Option<&str>) -> String {
 /// to it afterwards. Restarting the rebuilt queue is the only reliable way.
 /// (And `play q`, not `play track 1 of q`, for the reason given at
 /// `play_playlist_at`.)
+///
+/// `shuffled`: `Some(true)` marks the new queue as shuffled by `am`,
+/// `Some(false)` clears the mark, `None` keeps whatever the old queue had
+/// (adding a song to a shuffled queue leaves it shuffled).
 pub fn replace_queue(
     ids: &[String],
     source: Option<&str>,
     play: bool,
     resume_at: Option<(f64, bool)>,
+    shuffled: Option<bool>,
 ) -> String {
-    let mut s = String::from(QUEUE_PRELUDE);
+    let mark = match shuffled {
+        Some(true) => format!("    set description of q to {}\n", quote(SHUFFLE_MARK)),
+        Some(false) => String::new(), // a new playlist has no description
+        // Found by testing: `set description of q to (description of old)`
+        // fails in one step; reading it into `oldMark` first works.
+        None => {
+            "    if oldMark is not missing value then set description of q to oldMark\n".to_string()
+        }
+    };
+    let mut s = QUEUE_PRELUDE.replace("{MARK}", &mark);
     s.push_str(&QUEUE_APPEND.replace("{SOURCE}", &source_lookup(source)));
     if play {
         // Wait even when there's nothing more to do, so the caller (and the
@@ -422,7 +451,7 @@ mod tests {
         let scripts = [
             tracks_of("library playlist 1"),
             play_playlist_at("ABC", 3),
-            replace_queue(&["A".into()], Some("P1"), true, Some((12.5, true))),
+            replace_queue(&["A".into()], Some("P1"), true, Some((12.5, true)), None),
             queue_state(),
             save_artwork("/tmp/x"),
         ];
@@ -444,25 +473,25 @@ mod tests {
 
     #[test]
     fn replace_queue_resumes_with_a_dot_decimal() {
-        let s = replace_queue(&["A".into()], None, true, Some((12.25, true)));
+        let s = replace_queue(&["A".into()], None, true, Some((12.25, true)), None);
         assert!(s.contains("play q"));
         assert!(
             s.contains("set player position to 12.2") || s.contains("set player position to 12.3")
         );
         assert!(s.contains("    pause\n"));
-        let s = replace_queue(&["A".into()], None, false, None);
+        let s = replace_queue(&["A".into()], None, false, None, None);
         assert!(!s.contains("play q"));
     }
 
     #[test]
     fn queue_songs_can_come_from_the_source_playlist() {
-        let with = replace_queue(&["A".into()], Some("ABC"), false, None);
+        let with = replace_queue(&["A".into()], Some("ABC"), false, None, None);
         assert!(
             with.contains(
                 "duplicate (first track of (first playlist whose persistent ID is \"ABC\")"
             )
         );
-        let without = replace_queue(&["A".into()], None, false, None);
+        let without = replace_queue(&["A".into()], None, false, None, None);
         assert!(!without.contains("first playlist whose"));
         // Both look in the library and the previous queue, then tidy up.
         for s in [with, without] {
@@ -470,6 +499,21 @@ mod tests {
             assert!(s.contains("first track of old"));
             assert!(s.contains("if old is not missing value then delete old"));
         }
+    }
+
+    #[test]
+    fn the_shuffle_mark_is_set_kept_or_cleared() {
+        let ids = ["A".to_string()];
+        let set = replace_queue(&ids, None, true, None, Some(true));
+        assert!(set.contains("set description of q to \"am:shuffled\""));
+        let kept = replace_queue(&ids, None, true, None, None);
+        assert!(kept.contains("set description of q to oldMark"));
+        let cleared = replace_queue(&ids, None, true, None, Some(false));
+        assert!(!cleared.contains("set description of q"));
+        // STATUS reads back the same name and mark (it can't use `quote` as
+        // it's a constant, so check they agree).
+        assert!(STATUS.contains(&quote(QUEUE_NAME)));
+        assert!(STATUS.contains(&quote(SHUFFLE_MARK)));
     }
 
     #[test]

@@ -26,7 +26,7 @@ pub fn parse_status(raw: &str) -> Result<StatusReply, MusicError> {
     // a bad reply is easy to debug.
     let bad = || MusicError::BadOutput(raw.to_string());
 
-    if f.len() < 4 {
+    if f.len() < 5 {
         return Err(bad());
     }
 
@@ -46,17 +46,18 @@ pub fn parse_status(raw: &str) -> Result<StatusReply, MusicError> {
         "all" => Repeat::All,
         _ => Repeat::Off,
     };
+    let queue_shuffled = f[4] == "true";
 
     // Track fields are optional: either all 6 are there, or none are.
-    let (track, position) = if f.len() >= 10 {
+    let (track, position) = if f.len() >= 11 {
         let track = Track {
-            id: f[4].to_string(),
-            name: f[5].to_string(),
-            artist: f[6].to_string(),
-            album: f[7].to_string(),
-            duration: parse_number(f[8]).ok_or_else(bad)?,
+            id: f[5].to_string(),
+            name: f[6].to_string(),
+            artist: f[7].to_string(),
+            album: f[8].to_string(),
+            duration: parse_number(f[9]).ok_or_else(bad)?,
         };
-        (Some(track), parse_number(f[9]).unwrap_or(0.0))
+        (Some(track), parse_number(f[10]).unwrap_or(0.0))
     } else {
         (None, 0.0)
     };
@@ -68,6 +69,7 @@ pub fn parse_status(raw: &str) -> Result<StatusReply, MusicError> {
         volume,
         shuffle,
         repeat,
+        queue_shuffled,
     }))
 }
 
@@ -202,6 +204,7 @@ mod tests {
             "60",
             "true",
             "all",
+            "true",
             "ABC123",
             "Test Song",
             "Some Band",
@@ -216,6 +219,7 @@ mod tests {
         assert_eq!(s.volume, 60);
         assert!(s.shuffle);
         assert_eq!(s.repeat, Repeat::All);
+        assert!(s.queue_shuffled);
         assert_eq!(s.position, 102.5);
         let t = s.track.unwrap();
         assert_eq!(t.name, "Test Song");
@@ -230,6 +234,7 @@ mod tests {
             "35",
             "false",
             "off",
+            "false",
             "ID",
             "Café “Ünïcode” 🎵",
             "A",
@@ -250,7 +255,7 @@ mod tests {
 
     #[test]
     fn stopped_has_no_track() {
-        let raw = reply(&["stopped", "50", "false", "one"]);
+        let raw = reply(&["stopped", "50", "false", "one", "false"]);
         let StatusReply::Status(s) = parse_status(&raw).unwrap() else {
             panic!("expected a status");
         };
@@ -261,7 +266,7 @@ mod tests {
 
     #[test]
     fn stream_without_track_fields_still_parses() {
-        let raw = reply(&["playing", "50", "false", "off"]);
+        let raw = reply(&["playing", "50", "false", "off", "false"]);
         let StatusReply::Status(s) = parse_status(&raw).unwrap() else {
             panic!("expected a status");
         };
@@ -379,7 +384,7 @@ mod tests {
             parse_status("hello"),
             Err(MusicError::BadOutput(_))
         ));
-        let raw = reply(&["dancing", "50", "false", "off"]);
+        let raw = reply(&["dancing", "50", "false", "off", "false"]);
         assert!(matches!(parse_status(&raw), Err(MusicError::BadOutput(_))));
     }
 }

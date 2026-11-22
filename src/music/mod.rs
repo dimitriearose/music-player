@@ -62,8 +62,11 @@ pub struct PlayerStatus {
     pub position: f64,
     /// 0–100.
     pub volume: u8,
+    /// Music's own shuffle setting (the `s` key).
     pub shuffle: bool,
     pub repeat: Repeat,
+    /// Playing from `am`'s queue after `am` shuffled it (the `S` key).
+    pub queue_shuffled: bool,
 }
 
 /// One song in your library (or in a playlist / the queue).

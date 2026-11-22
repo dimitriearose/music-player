@@ -94,11 +94,15 @@ impl Music {
     ///
     /// `source` is the playlist the songs came from, if any, so songs that
     /// aren't in your library (most liked songs) can be copied from it.
+    ///
+    /// `shuffled` says whether `am` shuffled these songs (the `S` key), so
+    /// the status line can show it; `None` keeps the queue's current mark.
     pub fn play_songs(
         &self,
         ids: &[String],
         start: usize,
         source: Option<&str>,
+        shuffled: Option<bool>,
     ) -> Result<(), MusicError> {
         check_ids(ids)?;
         if let Some(id) = source {
@@ -106,7 +110,7 @@ impl Music {
         }
         let from = start.saturating_sub(1).min(ids.len());
         let songs = capped(&ids[from..]);
-        osascript::run(&scripts::replace_queue(songs, source, true, None)).map(|_| ())
+        osascript::run(&scripts::replace_queue(songs, source, true, None, shuffled)).map(|_| ())
     }
 
     /// What's in the queue, and whether we're playing from it.
@@ -125,7 +129,7 @@ impl Music {
     /// before it.
     pub fn play_queue_at(&self, index: usize) -> Result<(), MusicError> {
         let ids: Vec<String> = self.queue()?.songs.into_iter().map(|s| s.id).collect();
-        self.play_songs(&ids, index, None)
+        self.play_songs(&ids, index, None, None)
     }
 
     /// Put songs in the queue: right after the current song (`next = true`)
@@ -170,7 +174,16 @@ impl Music {
                     None => Vec::new(),
                 };
                 let order = queue_order(Some(current), &upcoming, ids, next);
-                let script = scripts::replace_queue(&order, source, true, Some((position, paused)));
+                // Still shuffled if we were playing a shuffled queue; not if
+                // we've just switched over from some other playlist.
+                let keep_mark = if queue.active { None } else { Some(false) };
+                let script = scripts::replace_queue(
+                    &order,
+                    source,
+                    true,
+                    Some((position, paused)),
+                    keep_mark,
+                );
                 osascript::run(&script)?;
                 Ok(if queue.active {
                     Queued::Added
@@ -183,7 +196,7 @@ impl Music {
                 // don't start it.
                 let existing: Vec<String> = queue.songs.into_iter().map(|s| s.id).collect();
                 let order = queue_order(None, &existing, ids, next);
-                osascript::run(&scripts::replace_queue(&order, source, false, None))?;
+                osascript::run(&scripts::replace_queue(&order, source, false, None, None))?;
                 Ok(Queued::Ready)
             }
         }

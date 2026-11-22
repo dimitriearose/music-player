@@ -309,7 +309,7 @@ impl Worker {
             }
             Command::PlayPlaylist { id, index } => m.play_playlist(&id, index),
             Command::PlaySongs { ids, start } => {
-                m.play_songs(&ids, start, None)?;
+                m.play_songs(&ids, start, None, Some(false))?;
                 self.send_queue();
                 Ok(())
             }
@@ -341,7 +341,7 @@ impl Worker {
                     return Ok(());
                 }
                 shuffle::shuffle(&mut ids, shuffle::seed());
-                m.play_songs(&ids, 1, source.as_deref())?;
+                m.play_songs(&ids, 1, source.as_deref(), Some(true))?;
                 let notice = if ids.len() > MAX_QUEUE {
                     format!("Shuffling {MAX_QUEUE} random songs of {}", ids.len())
                 } else {

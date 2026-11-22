@@ -280,6 +280,9 @@ impl App {
             Command::SetVolume(v) => s.volume = *v,
             Command::ToggleShuffle => s.shuffle = !s.shuffle,
             Command::CycleRepeat => s.repeat = next_repeat(s.repeat),
+            // Show "shuffled queue" (or stop showing it) straight away.
+            Command::PlayShuffled { .. } => s.queue_shuffled = true,
+            Command::PlaySongs { .. } | Command::PlayPlaylist { .. } => s.queue_shuffled = false,
             // Everything else: we can't know the result in advance (e.g. the
             // next song), so we just wait for the worker to tell us.
             // Rust note: `_` matches all remaining cases.
@@ -595,6 +598,7 @@ mod tests {
             volume: 50,
             shuffle: false,
             repeat: Repeat::Off,
+            queue_shuffled: false,
         }
     }
 
