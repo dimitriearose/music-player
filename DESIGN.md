@@ -1,6 +1,6 @@
 # am — a quiet terminal front end for Apple Music
 
-Status: **approved** · 2026-11-22
+Status: **approved and implemented (M1–M6)** · 2026-11-22. Section 12 records what building it changed.
 
 ## 1. Intent
 
@@ -112,7 +112,8 @@ Speakers tab arrives in M5, and Queue in M4.
 | `a` | show / hide album art |
 | `/` | open library pop-up |
 | `j` `k` / `↓` `↑` | move in lists |
-| `.` | (in pop-up) play next · `Q` add to queue |
+| `.` / `Ctrl-N` | (in pop-up) play next |
+| `Q` / `Ctrl-A` | (in pop-up) add to queue |
 | `?` | key help overlay |
 | `q` | quit (Music keeps playing) |
 
@@ -163,17 +164,24 @@ There is no `:` command mode.
 
 ### 6.3 Queue, albums, playlists
 
-Music.app can't read or change Up Next, so `am` keeps its own playlist
-named **`am · Queue`**:
+Music.app's scripting can't see or change Up Next, so `am` keeps its own
+playlist named **`am · Queue`**. It's hidden from `am`'s Playlists tab.
 
-- **Play an album or song list:** clear `am · Queue`, add the tracks in
-  order, play the playlist.
-- **Play next / add to queue:** insert or append tracks in `am · Queue`.
-- **Queue tab:** lists `am · Queue`, starting at the current track.
-- **Library views:** hide the playlist, because it's an implementation
-  detail.
-- **Trade-off:** while you use `am`, Music's own Up Next isn't used.
-- **Playing a saved playlist:** plays that playlist directly.
+- **Playing an album, an artist or search results:** fill the queue with
+  the chosen song and everything after it, then `play` the queue
+  playlist.
+- **Play next / add to queue:** rebuild the queue as
+  [current song, new order…], `play` it, jump back to the same position,
+  and pause again if it was paused.
+- **Playing a saved playlist from song *n*:** `play` the playlist, wait
+  0.3 s, then skip forward *n − 1* times.
+- **Queue tab:** lists `am · Queue` from the current song onward. Enter
+  jumps to a song by rebuilding the queue from that song.
+- **Size limit:** the queue holds at most 200 songs. Filling it costs
+  ~10 ms per song.
+
+Section 12 explains why it works this way instead of the simpler
+"insert into the playlist" first planned.
 
 ### 6.4 Album art (M6)
 
@@ -190,30 +198,36 @@ music-player/
 ├── Cargo.lock            # committed (this is an app, not a library)
 ├── README.md             # setup, permissions, keys, git basics
 ├── DESIGN.md             # this file
-├── .gitignore
+├── docs/plans/           # per-milestone plans
+├── examples/live_check.rs  # end-to-end test against the real Music.app
 └── src/
     ├── main.rs           # terminal setup/restore (also on panic), event loop
     ├── app.rs            # App state + key handling (pure logic, unit-tested)
+    ├── popup.rs          # library pop-up: tabs, rows, Enter actions (tested)
+    ├── library.rs        # in-memory library + search (tested)
+    ├── art.rs            # artwork decoding, half-block colours (tested)
     ├── worker.rs         # background thread, Command/Update channels
-    ├── library.rs        # in-memory library + search
+    ├── check.rs          # `am --check` read-only self-test
     ├── music/
-    │   ├── mod.rs        # public API: Music, Track, PlayerStatus, MusicError
-    │   ├── osascript.rs  # run a script, map exit codes to MusicError
+    │   ├── mod.rs        # types: Track, Song, PlayerStatus, MusicError…
+    │   ├── osascript.rs  # run a script, map error codes to MusicError
     │   ├── scripts.rs    # all AppleScript text in one place
-    │   └── parse.rs      # split delimited output into structs (unit-tested)
+    │   ├── parse.rs      # split delimited output into structs (tested)
+    │   └── queue.rs      # library/queue/AirPlay/artwork commands
     └── ui/
         ├── mod.rs        # top-level draw()
         ├── now_playing.rs
-        ├── popup.rs      # library / queue / speakers tabs
-        ├── help.rs
-        └── art.rs
+        ├── popup.rs
+        └── help.rs
 ```
 
-Expected crates:
-- `ratatui` and `crossterm` for the terminal UI.
-- `anyhow` for errors in `main`, and `thiserror` for `MusicError`.
-- `nucleo-matcher` (or `fuzzy-matcher`) for search, from M3.
-- `image` for album art, from M6.
+Crates used:
+- `ratatui` for the terminal UI. Its bundled `crossterm` handles input.
+- `anyhow` and `thiserror` for errors.
+- `image` (JPEG and PNG only) for album art.
+
+Search is about 30 lines in `library.rs` rather than a fuzzy-search
+crate. For a few thousand songs it's instant, and it's easier to read.
 
 ## 8. Milestones
 
@@ -269,3 +283,32 @@ are personal data, and these are the guards against that:
 - Colours: default terminal foreground plus one dim grey and one accent.
   No truecolor assumed.
 - Exact fuzzy-search crate and album-art scaling method.
+
+## 12. What building it changed (found by testing against Music.app)
+
+`examples/live_check.rs` plays, queues and skips at volume 0 and checks
+Music's real state after each step. It turned up these behaviours. Each is
+also a "Found by testing" comment in `src/music/scripts.rs`.
+
+1. **`play track N of playlist P` plays that one song outside the
+   playlist.** `next` then goes somewhere unrelated. Playing the playlist
+   itself keeps `next` inside it.
+2. **`next track` sent right after `play` is ignored.** A 0.3 s `delay`
+   first fixes it.
+3. **Music fixes the play order when a playlist starts.** Songs added to a
+   playing playlist are ignored, so queue edits rebuild the queue and
+   restart it at the same position.
+4. **Shuffle and repeat read back their old value for a moment** after
+   being changed. The worker waits 300 ms after running commands before
+   polling.
+5. **Reserved words.**
+   - `st` is reserved by AppleScript (ordinals like `1st`).
+   - `names` and `active` are reserved by Music's dictionary.
+
+   Variables avoid all three.
+
+Measured on a 1,583-song library:
+- loading the library: ~0.5 s;
+- status poll: ~0.15 s;
+- AirPlay list: ~1 s;
+- filling the queue: ~10 ms per song.

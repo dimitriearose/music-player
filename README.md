@@ -14,9 +14,14 @@ clutter.
                ▶ playing   vol 60   ⤮ shuffle
 ```
 
-**Status:** milestone 2 of 6 (now playing, playback controls, seek, volume,
-shuffle, repeat).
-See [DESIGN.md](DESIGN.md) for the full plan.
+**Status:** all six milestones are done:
+- now playing, with album art;
+- playback controls, seek, volume, shuffle and repeat;
+- library search and browsing;
+- a queue ("play next" / "add to queue");
+- AirPlay speakers.
+
+See [DESIGN.md](DESIGN.md) for how it's built.
 
 ---
 
@@ -56,7 +61,7 @@ cargo --version
 ### 2. Get the code and run it
 
 ```bash
-git clone <your-repo-url> music-player
+git clone https://github.com/dimitriearose/music-player.git
 ```
 
 ```bash
@@ -117,6 +122,8 @@ can press `o` to reopen it.
 
 ## Keys
 
+### Now-playing screen
+
 | Key | Action |
 |---|---|
 | `space` | play / pause |
@@ -125,11 +132,57 @@ can press `o` to reopen it.
 | `+` / `-` | volume up / down by 5 (`=` works for `+` too, no Shift needed) |
 | `s` | shuffle on / off |
 | `r` | repeat: off → all → one → off |
+| `/` | open the library pop-up |
+| `a` | album art on / off |
 | `?` | show / hide this list on screen (`Esc` closes it) |
 | `o` | open Music (when it isn't running) |
 | `q` or `Ctrl-C` | quit `am` (Music keeps playing) |
 
-More keys arrive with later milestones (library search, queue, AirPlay…).
+### Library pop-up (`/`)
+
+The pop-up has six tabs: **Search · Playlists · Albums · Artists · Queue ·
+Speakers**.
+
+| Key | Action |
+|---|---|
+| `Tab` / `Shift-Tab` | next / previous tab |
+| `↑` `↓` (or `k` `j` outside the search box) | move |
+| `Enter` (or `l` / `→` outside the search box) | play a song, open an album / artist / playlist, or switch a speaker on/off |
+| `Ctrl-N` (or `.`) | **play next**: put the song/album right after the current song |
+| `Ctrl-A` (or `Q`) | **add to queue**: put it at the end |
+| `Esc` (or `h` / `←` / Backspace) | go back, or close the pop-up |
+| `Ctrl-R` | reload your library (after adding music in Music.app) |
+
+In the Search tab, letters type into the search box, so use the arrow keys
+and the `Ctrl` shortcuts there. Every word you type must appear somewhere,
+in any order: `nat blood` finds "Bloodbuzz Ohio" by The National.
+
+Playing something closes the pop-up and takes you back to the quiet screen.
+
+### About the queue
+
+Music.app doesn't let other programs touch its own "Up Next" list. So `am`
+keeps its own playlist called **`am · Queue`** and plays from it:
+
+- **Playing an album, an artist or search results** fills the queue with
+  those songs and plays it.
+- **"Play next" and "add to queue"** rebuild the queue around the song
+  you're hearing and carry on from the same spot. You may notice a tiny
+  skip.
+- **The Queue tab** shows what's coming up. Press `Enter` on a song to jump
+  to it.
+- **Hidden in `am`:** the playlist doesn't appear in `am`'s Playlists tab.
+- **Visible in Music.app:** you'll see it there, and on your other devices
+  if you use iCloud Music Library. It's safe to delete; `am` recreates it
+  when needed.
+
+### Album art
+
+The art is drawn with coloured text blocks, because Terminal.app can't show
+real images. It appears above the song title when the window is tall enough,
+and `a` hides it. Terminal.app uses 256 colours, so the art's colours are
+close but not exact. Terminals with full colour (iTerm2, Ghostty, kitty)
+show them exactly.
 
 ---
 
@@ -139,7 +192,11 @@ More keys arrive with later milestones (library search, queue, AirPlay…).
   macOS program `osascript`.
 - A background thread asks Music for its status once a second, and the screen
   redraws 10 times a second. The progress bar moves smoothly between checks.
+- Your whole library is read once at startup, in about half a second for
+  ~1,500 songs, and kept in memory, so searching is instant.
 - All AppleScript is in [`src/music/scripts.rs`](src/music/scripts.rs).
+  Comments marked **"Found by testing"** record surprises in how Music.app
+  really behaves.
 
 You can try the same thing `am` does yourself, right in the terminal:
 
@@ -151,22 +208,43 @@ osascript -e 'tell application "Music" to name of current track'
 osascript -e 'tell application "Music" to playpause'
 ```
 
+### When something doesn't work: `am --check`
+
+```bash
+cargo run -- --check
+```
+
+This runs every read-only script once and reports, with timings:
+- your status, library counts, queue and speakers;
+- whether album art can be read.
+
+It never plays or changes anything, and it prints counts, not song names.
+(The `--` tells cargo that `--check` is meant for `am`, not for cargo.)
+
 ## Code tour (where to start reading)
 
 ```
 src/
 ├── main.rs              start here: sets up the terminal, runs the main loop
 ├── app.rs               the app's state + what each key does (has tests)
+├── popup.rs             the library pop-up: tabs, rows, what Enter does (has tests)
+├── library.rs           your library in memory + search (has tests)
+├── art.rs               album art → coloured text blocks (has tests)
 ├── worker.rs            the background thread that talks to Music
+├── check.rs             `am --check`
 ├── music/
-│   ├── mod.rs           the types: Track, PlayerStatus, MusicError…
+│   ├── mod.rs           the types: Track, Song, PlayerStatus, MusicError…
 │   ├── scripts.rs       every AppleScript, in one place
 │   ├── osascript.rs     runs a script, turns errors into MusicError
-│   └── parse.rs         turns osascript's output into Rust structs (has tests)
+│   ├── parse.rs         turns osascript's output into Rust structs (has tests)
+│   └── queue.rs         library, queue, AirPlay and artwork commands
 └── ui/
     ├── mod.rs           draws whichever screen applies
-    ├── now_playing.rs   the focus screen
+    ├── now_playing.rs   the focus screen (and album art)
+    ├── popup.rs         the library pop-up
     └── help.rs          the `?` key list
+examples/
+└── live_check.rs        end-to-end test against the real Music.app
 ```
 
 Comments marked **"Rust note:"** explain a Rust concept the first time it shows
@@ -178,6 +256,7 @@ up.
 |---|---|
 | `cargo run` | build and start the app |
 | `cargo test` | run the unit tests (they use made-up songs, never your library) |
+| `cargo run --example live_check` | really play, queue, seek and skip in Music.app, **at volume 0**, and check each step worked. Uses the first few songs of your library; stops playback, empties the queue and restores your volume afterwards |
 | `cargo clippy` | Rust's linter: points out likely mistakes and unidiomatic code |
 | `cargo fmt` | reformat all code to the standard Rust style |
 | `cargo build --release` | build an optimised version into `target/release/am` |
