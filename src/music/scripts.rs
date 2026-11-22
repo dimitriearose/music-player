@@ -80,3 +80,313 @@ end tell
 pub fn set_volume(volume: u8) -> String {
     format!(r#"tell application "Music" to set sound volume to {volume}"#)
 }
+
+// ───────────────────────── Library (M3) ─────────────────────────
+//
+// The scripts below need values filled in (IDs, names, numbers). Instead of
+// `format!`, they use a template with `{PLACEHOLDERS}` and `.replace(...)`.
+// That's because AppleScript itself uses `{ }` for lists and records, and
+// `format!` would treat every `{` as a placeholder.
+//
+// Every value put into a script goes through `quote()` (for text) or is a
+// number, so a song or speaker name containing `"` can't break the script.
+
+/// The name of the hidden playlist `am` uses as its queue (DESIGN.md §6.3).
+pub const QUEUE_NAME: &str = "am · Queue";
+
+/// Wrap text in AppleScript double quotes, escaping `\` and `"` inside it.
+///
+/// `say "hi"` would end the string early; `quote("say \"hi\"")` makes it safe.
+pub fn quote(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// An AppleScript list of quoted strings: `{"A", "B"}`.
+pub fn quote_list(items: &[String]) -> String {
+    // `.iter().map(...)` transforms each item; `.collect::<Vec<_>>()` gathers
+    // the results; `.join(", ")` glues them together with commas.
+    let quoted: Vec<String> = items.iter().map(|s| quote(s)).collect();
+    format!("{{{}}}", quoted.join(", ")) // `{{` in format! means a literal `{`
+}
+
+/// Every track in `container`, as 8 columns separated by ASCII 30, each
+/// column a list of values separated by ASCII 31:
+///
+/// `ids ␞ names ␞ artists ␞ albums ␞ album artists ␞ durations ␞ discs ␞ track numbers`
+///
+/// Asking for "the name of every track" is one Apple event for the whole
+/// list, so this is ~8 round trips in total instead of 8 per song: the
+/// difference between under a second and minutes for a big library.
+///
+/// `container` is AppleScript like `library playlist 1`. Returns "" if the
+/// container doesn't exist or is empty.
+pub fn tracks_of(container: &str) -> String {
+    r#"
+set US to character id 31
+set RS to character id 30
+tell application "Music"
+    try
+        set c to {CONTAINER}
+        if (count of tracks of c) is 0 then return ""
+    on error
+        return ""
+    end try
+    set cols to {persistent ID of every track of c, name of every track of c, artist of every track of c, album of every track of c, album artist of every track of c, duration of every track of c, disc number of every track of c, track number of every track of c}
+end tell
+set out to {}
+set AppleScript's text item delimiters to US
+repeat with i from 1 to count of cols
+    set end of out to ((item i of cols) as text)
+end repeat
+set AppleScript's text item delimiters to RS
+return out as text
+"#
+    .replace("{CONTAINER}", container)
+}
+
+/// Every normal playlist (no folders, no built-in "Music"/"Library" lists):
+/// `ids ␞ names`, each a list separated by ASCII 31.
+pub const PLAYLISTS: &str = r#"
+set US to character id 31
+set RS to character id 30
+tell application "Music"
+    -- (Not `names`: Music's dictionary reserves that word.)
+    set plIds to persistent ID of every user playlist whose special kind is none
+    set plNames to name of every user playlist whose special kind is none
+end tell
+set AppleScript's text item delimiters to US
+set a to plIds as text
+set b to plNames as text
+set AppleScript's text item delimiters to RS
+return {a, b} as text
+"#;
+
+/// AppleScript for "the playlist with this persistent ID".
+pub fn playlist_ref(id: &str) -> String {
+    format!("(first user playlist whose persistent ID is {})", quote(id))
+}
+
+/// Play a saved playlist starting at song `index` (1 = first).
+///
+/// Found by testing (M3): `play track 3 of playlist P` plays that one song
+/// *outside* the playlist, so "next" then wanders off elsewhere. Playing the
+/// playlist itself keeps "next" inside it. So we start the playlist and
+/// skip forward. Music ignores a skip sent the instant playback starts,
+/// hence the short `delay`.
+pub fn play_playlist_at(id: &str, index: usize) -> String {
+    let mut s = format!(
+        "tell application \"Music\"\n    play {}\n",
+        playlist_ref(id)
+    );
+    if index > 1 {
+        s.push_str(&format!(
+            "    delay 0.3\n    repeat {} times\n        next track\n    end repeat\n",
+            index - 1
+        ));
+    }
+    s.push_str("end tell\n");
+    s
+}
+
+/// Shared opening for every queue script: make sure the queue playlist
+/// exists, and call it `q`.
+const QUEUE_PRELUDE: &str = r#"
+tell application "Music"
+    if not (exists user playlist {QNAME}) then
+        make new user playlist with properties {name:{QNAME}}
+    end if
+    set q to user playlist {QNAME}
+"#;
+
+/// Copy the tracks with these IDs (in order) onto the end of `q`. A track
+/// that's no longer in the library is skipped instead of stopping the script.
+const QUEUE_APPEND: &str = r#"
+    repeat with pid in {IDS}
+        try
+            duplicate (first track of library playlist 1 whose persistent ID is (contents of pid)) to q
+        end try
+    end repeat
+"#;
+
+/// Empty the queue, fill it with `ids`, and (if `play`) start playing it
+/// from the first song. With `resume_at`, jump that many seconds into the
+/// first song, and pause again if `paused`: that's how "play next" carries
+/// on with the song you're already hearing.
+///
+/// Why always rebuild instead of inserting? Found by testing (M4): Music
+/// fixes the playing order when a playlist *starts*, and ignores songs added
+/// to it afterwards. Restarting the rebuilt queue is the only reliable way.
+/// (And `play q`, not `play track 1 of q`, for the reason given at
+/// `play_playlist_at`.)
+pub fn replace_queue(ids: &[String], play: bool, resume_at: Option<(f64, bool)>) -> String {
+    let mut s = String::from(QUEUE_PRELUDE);
+    s.push_str("    try\n        delete every track of q\n    end try\n");
+    s.push_str(QUEUE_APPEND);
+    if play {
+        s.push_str("    play q\n");
+        if let Some((pos, paused)) = resume_at {
+            // `{:.1}` = one decimal place, always written with a "." which is
+            // what AppleScript *source code* expects (whatever your region).
+            s.push_str(&format!(
+                "    delay 0.3\n    set player position to {pos:.1}\n"
+            ));
+            if paused {
+                s.push_str("    pause\n");
+            }
+        }
+    }
+    s.push_str("end tell\n");
+    fill_queue_template(s, ids)
+}
+
+fn fill_queue_template(script: String, ids: &[String]) -> String {
+    script
+        .replace("{QNAME}", &quote(QUEUE_NAME))
+        .replace("{IDS}", &quote_list(ids))
+}
+
+/// `true␟<current track id>` if Music is playing from our queue playlist,
+/// otherwise `false␟<id>` (the id may be empty if nothing is loaded).
+pub const QUEUE_STATE: &str = r#"
+set US to character id 31
+tell application "Music"
+    -- (Not `active`: Music reserves that word for AirPlay devices.)
+    set inQueue to false
+    set tid to ""
+    try
+        set inQueue to ((name of current playlist) is {QNAME})
+    end try
+    try
+        set tid to persistent ID of current track
+    end try
+end tell
+return (inQueue as text) & US & tid
+"#;
+
+pub fn queue_state() -> String {
+    QUEUE_STATE.replace("{QNAME}", &quote(QUEUE_NAME))
+}
+
+pub fn queue_tracks() -> String {
+    tracks_of(&format!("user playlist {}", quote(QUEUE_NAME)))
+}
+
+// ───────────────────────── AirPlay (M5) ─────────────────────────
+
+/// One record per AirPlay device, separated by ASCII 30:
+/// `name ␟ kind ␟ selected ␟ available`.
+pub const SPEAKERS: &str = r#"
+set US to character id 31
+set RS to character id 30
+set out to {}
+tell application "Music"
+    repeat with d in (every AirPlay device)
+        set end of out to (name of d) & US & (kind of d as text) & US & (selected of d as text) & US & (available of d as text)
+    end repeat
+end tell
+set AppleScript's text item delimiters to RS
+return out as text
+"#;
+
+/// Turn one AirPlay device on or off (Music can play to several at once).
+pub fn set_speaker(name: &str, on: bool) -> String {
+    format!(
+        "tell application \"Music\" to set selected of (first AirPlay device whose name is {}) to {on}",
+        quote(name)
+    )
+}
+
+// ───────────────────────── Album art (M6) ─────────────────────────
+
+/// Write the current track's artwork to the file at `path` and return `OK`,
+/// or return `NONE` if the track has no artwork.
+///
+/// The file writing happens *outside* the `tell` block: inside it, AppleScript
+/// would ask Music to write the file, and Music doesn't know how.
+pub fn save_artwork(path: &str) -> String {
+    r#"
+tell application "Music"
+    try
+        set d to raw data of artwork 1 of current track
+    on error
+        return "NONE"
+    end try
+end tell
+set f to open for access (POSIX file {PATH}) with write permission
+try
+    set eof f to 0
+    write d to f
+    close access f
+on error e
+    close access f
+    error e
+end try
+return "OK"
+"#
+    .replace("{PATH}", &quote(path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quote_escapes_quotes_and_backslashes() {
+        assert_eq!(quote("plain"), "\"plain\"");
+        assert_eq!(quote(r#"say "hi""#), r#""say \"hi\"""#);
+        assert_eq!(quote(r"back\slash"), r#""back\\slash""#);
+    }
+
+    #[test]
+    fn quote_list_builds_an_applescript_list() {
+        assert_eq!(quote_list(&["A1".into(), "B2".into()]), r#"{"A1", "B2"}"#);
+        assert_eq!(quote_list(&[]), "{}");
+    }
+
+    #[test]
+    fn templates_leave_no_placeholders_behind() {
+        let scripts = [
+            tracks_of("library playlist 1"),
+            play_playlist_at("ABC", 3),
+            replace_queue(&["A".into()], true, Some((12.5, true))),
+            queue_state(),
+            save_artwork("/tmp/x"),
+        ];
+        for s in scripts {
+            for placeholder in [
+                "{CONTAINER}",
+                "{INDEX}",
+                "{PLAYLIST}",
+                "{QNAME}",
+                "{IDS}",
+                "{PATH}",
+            ] {
+                assert!(!s.contains(placeholder), "{placeholder} left in:\n{s}");
+            }
+        }
+    }
+
+    #[test]
+    fn replace_queue_resumes_with_a_dot_decimal() {
+        let s = replace_queue(&["A".into()], true, Some((12.25, true)));
+        assert!(s.contains("play q"));
+        assert!(
+            s.contains("set player position to 12.2") || s.contains("set player position to 12.3")
+        );
+        assert!(s.contains("    pause\n"));
+        let s = replace_queue(&["A".into()], false, None);
+        assert!(!s.contains("play q"));
+    }
+
+    #[test]
+    fn playing_a_playlist_from_song_3_skips_twice_after_a_pause() {
+        let s = play_playlist_at("ABC", 3);
+        assert!(s.contains("play (first user playlist whose persistent ID is \"ABC\")"));
+        assert!(s.contains("delay 0.3"));
+        assert!(s.contains("repeat 2 times"));
+        assert!(
+            !play_playlist_at("ABC", 1).contains("repeat"),
+            "song 1 needs no skipping"
+        );
+    }
+}

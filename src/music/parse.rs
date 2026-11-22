@@ -3,11 +3,15 @@
 //! This is kept separate from `osascript.rs` on purpose: parsing is pure
 //! (text in, struct out, no Music.app needed), so it's easy to test.
 
-use super::{MusicError, PlayState, PlayerStatus, Repeat, StatusReply, Track};
+use super::{
+    MusicError, PlayState, PlayerStatus, Playlist, Repeat, Song, Speaker, StatusReply, Track,
+};
 
 /// ASCII 31, the "unit separator". `char::from(31)` would also work; `\u{1f}`
 /// is the same character written as a Unicode escape.
 pub const FIELD_SEP: char = '\u{1f}';
+/// ASCII 30, the "record separator": splits columns or records.
+pub const RECORD_SEP: char = '\u{1e}';
 
 /// Parse the output of `scripts::STATUS`.
 pub fn parse_status(raw: &str) -> Result<StatusReply, MusicError> {
@@ -65,6 +69,113 @@ pub fn parse_status(raw: &str) -> Result<StatusReply, MusicError> {
         shuffle,
         repeat,
     }))
+}
+
+/// Parse the output of `scripts::tracks_of`: 8 columns, each a list.
+pub fn parse_songs(raw: &str) -> Result<Vec<Song>, MusicError> {
+    if raw.is_empty() {
+        return Ok(Vec::new()); // empty playlist / no queue yet
+    }
+    let bad = || MusicError::BadOutput(preview(raw));
+
+    // A `Vec<Vec<&str>>` is a list of lists: one inner list per column.
+    let cols: Vec<Vec<&str>> = raw
+        .split(RECORD_SEP)
+        .map(|col| col.split(FIELD_SEP).collect())
+        .collect();
+    if cols.len() != 8 {
+        return Err(bad());
+    }
+    let n = cols[0].len();
+    // Every column must have one value per song, or the columns don't line
+    // up and we'd pair the wrong artist with the wrong song.
+    if cols.iter().any(|c| c.len() != n) {
+        return Err(bad());
+    }
+
+    // `(0..n)` counts 0, 1, ..., n-1; `map` builds a Song for each.
+    let songs = (0..n)
+        .map(|i| Song {
+            id: cols[0][i].to_string(),
+            name: text(cols[1][i]),
+            artist: text(cols[2][i]),
+            album: text(cols[3][i]),
+            album_artist: text(cols[4][i]),
+            duration: parse_number(cols[5][i]).unwrap_or(0.0),
+            disc: cols[6][i].trim().parse().unwrap_or(0),
+            number: cols[7][i].trim().parse().unwrap_or(0),
+        })
+        .collect();
+    Ok(songs)
+}
+
+/// Parse `scripts::PLAYLISTS`: two columns, ids and names.
+pub fn parse_playlists(raw: &str) -> Result<Vec<Playlist>, MusicError> {
+    let Some((ids, names)) = raw.split_once(RECORD_SEP) else {
+        return Ok(Vec::new()); // no playlists at all
+    };
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<&str> = ids.split(FIELD_SEP).collect();
+    let names: Vec<&str> = names.split(FIELD_SEP).collect();
+    if ids.len() != names.len() {
+        return Err(MusicError::BadOutput(preview(raw)));
+    }
+    // `zip` walks two lists side by side, giving pairs.
+    Ok(ids
+        .into_iter()
+        .zip(names)
+        .map(|(id, name)| Playlist {
+            id: id.to_string(),
+            name: name.to_string(),
+        })
+        .collect())
+}
+
+/// Parse `scripts::SPEAKERS`: one record per device.
+pub fn parse_speakers(raw: &str) -> Result<Vec<Speaker>, MusicError> {
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    raw.split(RECORD_SEP)
+        .map(|record| {
+            let f: Vec<&str> = record.split(FIELD_SEP).collect();
+            if f.len() != 4 {
+                return Err(MusicError::BadOutput(preview(raw)));
+            }
+            Ok(Speaker {
+                name: f[0].to_string(),
+                kind: f[1].to_string(),
+                selected: f[2] == "true",
+                available: f[3] == "true",
+            })
+        })
+        // Collecting an iterator of `Result`s into `Result<Vec<_>, _>` stops at
+        // the first error. Handy!
+        .collect()
+}
+
+/// Parse `scripts::QUEUE_STATE`: `active ␟ current-id`.
+pub fn parse_queue_state(raw: &str) -> (bool, Option<String>) {
+    let (active, id) = raw.split_once(FIELD_SEP).unwrap_or((raw, ""));
+    let id = (!id.is_empty()).then(|| id.to_string());
+    (active == "true", id)
+}
+
+/// AppleScript prints a missing value as the words "missing value".
+fn text(s: &str) -> String {
+    if s == "missing value" {
+        String::new()
+    } else {
+        s.to_string()
+    }
+}
+
+/// First 200 characters of a reply, for error messages. (Large replies,
+/// like a whole library, would otherwise flood the screen.)
+fn preview(raw: &str) -> String {
+    raw.chars().take(200).collect()
 }
 
 /// Parse a decimal number the way AppleScript prints it.
@@ -167,6 +278,92 @@ mod tests {
             parse_status("NOT_RUNNING").unwrap(),
             StatusReply::NotRunning
         );
+    }
+
+    /// Join columns with RECORD_SEP, values with FIELD_SEP.
+    fn columns(cols: &[&[&str]]) -> String {
+        cols.iter()
+            .map(|c| c.join(&FIELD_SEP.to_string()))
+            .collect::<Vec<_>>()
+            .join(&RECORD_SEP.to_string())
+    }
+
+    #[test]
+    fn parses_songs_column_by_column() {
+        let raw = columns(&[
+            &["ID1", "ID2"],
+            &["First", "Second"],
+            &["Band", "Band"],
+            &["Album", "Album"],
+            &["", "missing value"],
+            &["200.5", "180,25"],
+            &["1", "1"],
+            &["1", "2"],
+        ]);
+        let songs = parse_songs(&raw).unwrap();
+        assert_eq!(songs.len(), 2);
+        assert_eq!(songs[1].name, "Second");
+        assert_eq!(songs[1].album_artist, "", "missing value becomes empty");
+        assert_eq!(songs[1].duration, 180.25);
+        assert_eq!(songs[1].number, 2);
+    }
+
+    #[test]
+    fn empty_song_list() {
+        assert_eq!(parse_songs("").unwrap(), vec![]);
+    }
+
+    #[test]
+    fn misaligned_song_columns_are_an_error() {
+        let raw = columns(&[
+            &["ID1", "ID2"],
+            &["only one"],
+            &[""],
+            &[""],
+            &[""],
+            &[""],
+            &[""],
+            &[""],
+        ]);
+        assert!(matches!(parse_songs(&raw), Err(MusicError::BadOutput(_))));
+    }
+
+    #[test]
+    fn parses_playlists() {
+        let raw = columns(&[&["P1", "P2"], &["Running", "Chill"]]);
+        let lists = parse_playlists(&raw).unwrap();
+        assert_eq!(
+            lists[1],
+            Playlist {
+                id: "P2".into(),
+                name: "Chill".into()
+            }
+        );
+        assert_eq!(parse_playlists(&columns(&[&[""], &[""]])).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn parses_speakers() {
+        let raw = [
+            ["Computer", "computer", "true", "true"].join(&FIELD_SEP.to_string()),
+            ["Kitchen", "HomePod", "false", "true"].join(&FIELD_SEP.to_string()),
+        ]
+        .join(&RECORD_SEP.to_string());
+        let s = parse_speakers(&raw).unwrap();
+        assert_eq!(s.len(), 2);
+        assert!(s[0].selected);
+        assert!(!s[1].selected);
+        assert_eq!(s[1].kind, "HomePod");
+    }
+
+    #[test]
+    fn parses_queue_state() {
+        let sep = FIELD_SEP.to_string();
+        assert_eq!(
+            parse_queue_state(&format!("true{sep}AB12")),
+            (true, Some("AB12".into()))
+        );
+        assert_eq!(parse_queue_state(&format!("false{sep}")), (false, None));
     }
 
     #[test]

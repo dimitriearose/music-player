@@ -11,6 +11,7 @@
 
 pub mod osascript;
 pub mod parse;
+pub mod queue;
 pub mod scripts;
 
 use thiserror::Error;
@@ -63,6 +64,67 @@ pub struct PlayerStatus {
     pub volume: u8,
     pub shuffle: bool,
     pub repeat: Repeat,
+}
+
+/// One song in your library (or in a playlist / the queue).
+///
+/// This has more detail than `Track` (which describes only what's playing):
+/// disc and track numbers let us sort an album into the right order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Song {
+    pub id: String,
+    pub name: String,
+    pub artist: String,
+    pub album: String,
+    /// The album's artist (e.g. "Various Artists"); often empty.
+    pub album_artist: String,
+    pub duration: f64,
+    pub disc: u32,
+    pub number: u32,
+}
+
+/// A saved playlist: just enough to list it and open it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Playlist {
+    pub id: String,
+    pub name: String,
+}
+
+/// An AirPlay output (your Mac's speakers count as one too).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Speaker {
+    pub name: String,
+    /// e.g. "computer", "AirPlay TV", "HomePod".
+    pub kind: String,
+    /// Is Music currently playing through it?
+    pub selected: bool,
+    /// Can it be used right now?
+    pub available: bool,
+}
+
+/// What's in `am`'s queue playlist and where we are in it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct QueueInfo {
+    /// Is Music playing *from the queue playlist* right now?
+    pub active: bool,
+    /// The persistent ID of whatever is playing (anywhere), if anything.
+    pub current_id: Option<String>,
+    pub songs: Vec<Song>,
+}
+
+impl QueueInfo {
+    /// Position (0-based) of the current song inside the queue, if we're
+    /// playing from the queue.
+    ///
+    /// Rust note: `?` works on `Option` too: if `current_id` is `None`, the
+    /// whole function returns `None` right there.
+    pub fn current_index(&self) -> Option<usize> {
+        if !self.active {
+            return None;
+        }
+        let id = self.current_id.as_ref()?;
+        self.songs.iter().position(|s| &s.id == id)
+    }
 }
 
 /// The answer to "what's going on?". Music might not be running at all,
