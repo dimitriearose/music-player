@@ -1,0 +1,132 @@
+//! The focus screen: title, artist/album, progress bar, play state.
+
+use super::{BOLD, DIM, centered};
+use crate::app::{App, format_time};
+use crate::music::{PlayState, Repeat};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    text::{Line, Span},
+};
+use std::time::Instant;
+
+/// The progress bar never gets wider than this, even on a huge window.
+/// A long bar is harder to read, not easier.
+const MAX_BAR_WIDTH: usize = 50;
+
+pub fn draw(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
+    // `let Some(x) = ... else { ... }` means: if it's `None`, run the
+    // `else` block (which must leave the function) instead.
+    let Some(status) = &app.status else { return };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    match &status.track {
+        Some(track) => {
+            lines.push(Line::styled(track.name.clone(), BOLD));
+            lines.push(Line::styled(artist_album(&track.artist, &track.album), DIM));
+            lines.push(Line::raw(""));
+
+            // Width available for the bar: the screen minus the two time
+            // labels and some margin. `saturating_sub` stops at 0 instead
+            // of crashing on a tiny window.
+            let pos = app.position(now);
+            let left = format_time(pos);
+            let right = format_time(track.duration);
+            let room = (area.width as usize).saturating_sub(left.len() + right.len() + 8);
+            let width = room.min(MAX_BAR_WIDTH);
+            let (filled, empty) = bar_parts(pos, track.duration, width);
+
+            lines.push(Line::from(vec![
+                Span::styled(left, DIM),
+                Span::raw(" "),
+                Span::raw("━".repeat(filled)),
+                Span::styled("─".repeat(empty), DIM),
+                Span::raw(" "),
+                Span::styled(right, DIM),
+            ]));
+        }
+        None => lines.push(Line::styled("Nothing playing", DIM)),
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(state_line(
+        status.state,
+        status.volume,
+        status.shuffle,
+        status.repeat,
+    ));
+
+    centered(frame, area, lines);
+}
+
+/// "Artist — Album", leaving out whichever part is empty.
+fn artist_album(artist: &str, album: &str) -> String {
+    match (artist.is_empty(), album.is_empty()) {
+        (false, false) => format!("{artist} — {album}"),
+        (false, true) => artist.to_string(),
+        (true, false) => album.to_string(),
+        (true, true) => String::new(),
+    }
+}
+
+/// How many bar cells are filled vs. empty for a given position.
+fn bar_parts(pos: f64, duration: f64, width: usize) -> (usize, usize) {
+    if duration <= 0.0 {
+        return (0, width);
+    }
+    let fraction = (pos / duration).clamp(0.0, 1.0);
+    let filled = (fraction * width as f64).round() as usize;
+    (filled, width - filled)
+}
+
+/// "▶ playing   vol 60   ⤮ shuffle   ↻ all". Shuffle and repeat are
+/// only shown when they're on, to keep the line quiet.
+fn state_line(state: PlayState, volume: u8, shuffle: bool, repeat: Repeat) -> Line<'static> {
+    let state = match state {
+        PlayState::Playing => "▶ playing",
+        PlayState::Paused => "⏸ paused",
+        PlayState::Stopped => "■ stopped",
+    };
+    let mut parts = vec![state.to_string(), format!("vol {volume}")];
+    if shuffle {
+        parts.push("⤮ shuffle".into());
+    }
+    match repeat {
+        Repeat::Off => {}
+        Repeat::One => parts.push("↻ one".into()),
+        Repeat::All => parts.push("↻ all".into()),
+    }
+    Line::styled(parts.join("   "), DIM)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bar_fills_proportionally() {
+        assert_eq!(bar_parts(0.0, 100.0, 10), (0, 10));
+        assert_eq!(bar_parts(50.0, 100.0, 10), (5, 5));
+        assert_eq!(bar_parts(100.0, 100.0, 10), (10, 0));
+        assert_eq!(bar_parts(500.0, 100.0, 10), (10, 0), "clamped");
+        assert_eq!(bar_parts(5.0, 0.0, 10), (0, 10), "unknown length");
+        assert_eq!(bar_parts(5.0, 10.0, 0), (0, 0), "tiny window");
+    }
+
+    #[test]
+    fn artist_album_skips_missing_parts() {
+        assert_eq!(artist_album("A", "B"), "A — B");
+        assert_eq!(artist_album("A", ""), "A");
+        assert_eq!(artist_album("", "B"), "B");
+        assert_eq!(artist_album("", ""), "");
+    }
+
+    #[test]
+    fn state_line_hides_settings_that_are_off() {
+        let quiet = state_line(PlayState::Paused, 40, false, Repeat::Off).to_string();
+        assert_eq!(quiet, "⏸ paused   vol 40");
+        let busy = state_line(PlayState::Playing, 60, true, Repeat::All).to_string();
+        assert_eq!(busy, "▶ playing   vol 60   ⤮ shuffle   ↻ all");
+    }
+}
