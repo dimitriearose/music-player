@@ -88,6 +88,9 @@ pub struct Song {
 pub struct Playlist {
     pub id: String,
     pub name: String,
+    /// `true` for an Apple Music playlist you've added to your library
+    /// (Music calls these "subscription playlists"), `false` for one you made.
+    pub apple_music: bool,
 }
 
 /// An AirPlay output (your Mac's speakers count as one too).

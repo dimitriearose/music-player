@@ -109,26 +109,23 @@ pub fn parse_songs(raw: &str) -> Result<Vec<Song>, MusicError> {
     Ok(songs)
 }
 
-/// Parse `scripts::PLAYLISTS`: two columns, ids and names.
+/// Parse `scripts::PLAYLISTS`: three columns, ids, names and kinds.
 pub fn parse_playlists(raw: &str) -> Result<Vec<Playlist>, MusicError> {
-    let Some((ids, names)) = raw.split_once(RECORD_SEP) else {
+    let cols: Vec<Vec<&str>> = raw
+        .split(RECORD_SEP)
+        .map(|col| col.split(FIELD_SEP).collect())
+        .collect();
+    if raw.is_empty() || cols[0] == [""] {
         return Ok(Vec::new()); // no playlists at all
-    };
-    if ids.is_empty() {
-        return Ok(Vec::new());
     }
-    let ids: Vec<&str> = ids.split(FIELD_SEP).collect();
-    let names: Vec<&str> = names.split(FIELD_SEP).collect();
-    if ids.len() != names.len() {
+    if cols.len() != 3 || cols.iter().any(|c| c.len() != cols[0].len()) {
         return Err(MusicError::BadOutput(preview(raw)));
     }
-    // `zip` walks two lists side by side, giving pairs.
-    Ok(ids
-        .into_iter()
-        .zip(names)
-        .map(|(id, name)| Playlist {
-            id: id.to_string(),
-            name: name.to_string(),
+    Ok((0..cols[0].len())
+        .map(|i| Playlist {
+            id: cols[0][i].to_string(),
+            name: cols[1][i].to_string(),
+            apple_music: cols[2][i] == "subscription playlist",
         })
         .collect())
 }
@@ -330,16 +327,26 @@ mod tests {
 
     #[test]
     fn parses_playlists() {
-        let raw = columns(&[&["P1", "P2"], &["Running", "Chill"]]);
+        let raw = columns(&[
+            &["P1", "P2"],
+            &["Running", "Favorite Songs"],
+            &["user playlist", "subscription playlist"],
+        ]);
         let lists = parse_playlists(&raw).unwrap();
+        assert!(!lists[0].apple_music);
         assert_eq!(
             lists[1],
             Playlist {
                 id: "P2".into(),
-                name: "Chill".into()
+                name: "Favorite Songs".into(),
+                apple_music: true,
             }
         );
-        assert_eq!(parse_playlists(&columns(&[&[""], &[""]])).unwrap(), vec![]);
+        assert_eq!(
+            parse_playlists(&columns(&[&[""], &[""], &[""]])).unwrap(),
+            vec![]
+        );
+        assert!(parse_playlists(&columns(&[&["P1"], &["only two columns"]])).is_err());
     }
 
     #[test]

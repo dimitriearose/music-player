@@ -305,14 +305,23 @@ impl App {
             _ => None,
         };
         if let Some(next) = queue_next {
-            let ids = row
-                .map(|r| self.resolve_queue(&r.queue))
+            let row_queue = row.map(|r| r.queue);
+            let ids = row_queue
+                .as_ref()
+                .map(|q| self.resolve_queue(q))
                 .unwrap_or_default();
             if ids.is_empty() {
                 self.notice("Nothing to queue here (open a playlist first)", now);
                 return None;
             }
-            return Some(Command::Enqueue { ids, next });
+            // Songs picked inside a playlist (or a whole playlist) can be
+            // copied from that playlist if they aren't in your library.
+            let source = match (&row_queue, &self.popup.as_ref()?.view) {
+                (Some(Queueable::Playlist(id)), _) => Some(id.clone()),
+                (_, View::Playlist { id, .. }) => Some(id.clone()),
+                _ => None,
+            };
+            return Some(Command::Enqueue { ids, next, source });
         }
 
         let enter = match key.code {
@@ -726,7 +735,8 @@ mod tests {
             app.handle_key(key('.'), now),
             Some(Command::Enqueue {
                 ids: vec!["B2".into()],
-                next: true
+                next: true,
+                source: None,
             })
         );
         // Esc goes back to the album list, then closes.
@@ -750,7 +760,37 @@ mod tests {
             app.handle_key(ctrl_a, now),
             Some(Command::Enqueue {
                 ids: vec!["A1".into(), "B2".into()],
-                next: false
+                next: false,
+                source: None,
+            })
+        );
+    }
+
+    #[test]
+    fn songs_queued_from_inside_a_playlist_name_it_as_the_source() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        app.apply(
+            Update::PlaylistSongs {
+                id: "P9".into(),
+                songs: app.library.as_ref().unwrap().songs.clone(),
+            },
+            now,
+        );
+        app.popup = Some(Popup {
+            tab: Tab::Playlists,
+            view: View::Playlist {
+                id: "P9".into(),
+                name: "Favorite Songs".into(),
+            },
+            ..Popup::new()
+        });
+        assert_eq!(
+            app.handle_key(key('.'), now),
+            Some(Command::Enqueue {
+                ids: vec!["A1".into()],
+                next: true,
+                source: Some("P9".into()),
             })
         );
     }

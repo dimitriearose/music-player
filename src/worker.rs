@@ -63,6 +63,9 @@ pub enum Command {
     Enqueue {
         ids: Vec<String>,
         next: bool,
+        /// The playlist the songs were picked from, if any (see
+        /// `Music::enqueue`).
+        source: Option<String>,
     },
     LoadQueue,
     /// Jump to song `index` (1 = first) of the queue.
@@ -302,14 +305,14 @@ impl Worker {
                 self.send_queue();
                 Ok(())
             }
-            Command::Enqueue { ids, next } => {
+            Command::Enqueue { ids, next, source } => {
                 let count = ids.len();
                 let what = if count == 1 {
                     "1 song".to_string()
                 } else {
                     format!("{count} songs")
                 };
-                let notice = match m.enqueue(&ids, next)? {
+                let notice = match m.enqueue(&ids, next, source.as_deref())? {
                     Queued::Added if next => format!("Playing next: {what}"),
                     Queued::Added => format!("Added to queue: {what}"),
                     Queued::Started => format!("Queue started; {what} queued after this song"),

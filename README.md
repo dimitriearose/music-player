@@ -153,6 +153,12 @@ Speakers**.
 | `Esc` (or `h` / `←` / Backspace) | go back, or close the pop-up |
 | `Ctrl-R` | reload your library (after adding music in Music.app) |
 
+The Playlists tab lists everything in Music's sidebar. Your own playlists
+come first. Apple Music playlists you've added come after, marked
+**Apple Music**; that includes your liked songs, "Favorite Songs". You can
+queue songs from them even if they aren't in your library: `am` copies them
+from the playlist into the queue without adding them to your library.
+
 In the Search tab, letters type into the search box, so use the arrow keys
 and the `Ctrl` shortcuts there. Every word you type must appear somewhere,
 in any order: `nat blood` finds "Bloodbuzz Ohio" by The National.
@@ -172,6 +178,8 @@ keeps its own playlist called **`am · Queue`** and plays from it:
 - **The Queue tab** shows what's coming up. Press `Enter` on a song to jump
   to it.
 - **Hidden in `am`:** the playlist doesn't appear in `am`'s Playlists tab.
+  While a change is being made you might briefly see a second one,
+  "am · Queue (old)", which `am` deletes straight away.
 - **Visible in Music.app:** you'll see it there, and on your other devices
   if you use iCloud Music Library. It's safe to delete; `am` recreates it
   when needed.

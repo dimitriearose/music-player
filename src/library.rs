@@ -73,8 +73,10 @@ impl Library {
         artists.sort_by_key(|a| fold(a));
         artists.dedup();
 
+        // Your own playlists first, then Apple Music ones, each A–Z.
+        // (`false` sorts before `true`.)
         let mut playlists = playlists;
-        playlists.sort_by_key(|p| fold(&p.name));
+        playlists.sort_by_key(|p| (p.apple_music, fold(&p.name)));
 
         Library {
             songs,
@@ -202,6 +204,7 @@ mod tests {
             vec![Playlist {
                 id: "P1".into(),
                 name: "Morning Run".into(),
+                apple_music: false,
             }],
         )
     }
@@ -212,6 +215,26 @@ mod tests {
         let titles: Vec<&str> = lib.albums.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(titles, ["Colours", "First Album"]);
         assert_eq!(lib.artists, ["Other Band", "The Testers"]);
+    }
+
+    #[test]
+    fn own_playlists_come_before_apple_music_ones() {
+        let p = |name: &str, apple_music| Playlist {
+            id: "1".into(),
+            name: name.into(),
+            apple_music,
+        };
+        let lib = Library::new(
+            vec![],
+            vec![
+                p("Beats", true),
+                p("ital", false),
+                p("Ease", false),
+                p("Abc", true),
+            ],
+        );
+        let names: Vec<&str> = lib.playlists.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Ease", "ital", "Abc", "Beats"]);
     }
 
     #[test]

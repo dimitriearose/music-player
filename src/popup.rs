@@ -264,7 +264,12 @@ fn playlist_row(p: &crate::music::Playlist) -> Row {
     Row {
         icon: ICON_PLAYLIST,
         label: p.name.clone(),
-        detail: String::new(),
+        // Grey "Apple Music" tag, so two "Favorite Songs" can be told apart.
+        detail: if p.apple_music {
+            "Apple Music".into()
+        } else {
+            String::new()
+        },
         action: Action::Open(View::Playlist {
             id: p.id.clone(),
             name: p.name.clone(),
@@ -422,6 +427,7 @@ mod tests {
             vec![Playlist {
                 id: "P1".into(),
                 name: "Mix".into(),
+                apple_music: false,
             }],
         )
     }

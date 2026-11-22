@@ -312,3 +312,13 @@ Measured on a 1,583-song library:
 - status poll: ~0.15 s;
 - AirPlay list: ~1 s;
 - filling the queue: ~10 ms per song.
+6. **Apple Music playlists are a different class.** Added playlists and
+   liked songs ("Favorite Songs") are `subscription playlist`, not
+   `user playlist`, so `am` asks for every `playlist`.
+7. **Most liked songs aren't in the library.** On the owner's Mac it's 27
+   of 1,200. They can still be copied from their playlist into the queue,
+   and that doesn't add them to the library. The queue looks for each song
+   in the library, then the previous queue, then the source playlist.
+   That's why a rebuild renames the old queue instead of emptying it.
+8. **Streamed playlists start slowly.** A fixed 0.3 s pause before skipping
+   isn't enough, so scripts wait until `player state is playing`.

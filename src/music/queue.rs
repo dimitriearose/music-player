@@ -4,7 +4,7 @@
 //! Rust note: you can write several `impl Music { ... }` blocks in different
 //! files. They all add methods to the same type. This keeps `mod.rs` short.
 
-use super::scripts::{self, QUEUE_NAME};
+use super::scripts::{self, OLD_QUEUE_NAME, QUEUE_NAME};
 use super::{
     Music, MusicError, PlayState, Playlist, QueueInfo, Song, Speaker, StatusReply, osascript, parse,
 };
@@ -70,7 +70,7 @@ impl Music {
             parse::parse_songs(&osascript::run(&scripts::tracks_of("library playlist 1"))?)?;
         let mut playlists = parse::parse_playlists(&osascript::run(scripts::PLAYLISTS)?)?;
         // Our queue playlist is an implementation detail: hide it.
-        playlists.retain(|p| p.name != QUEUE_NAME);
+        playlists.retain(|p| p.name != QUEUE_NAME && p.name != OLD_QUEUE_NAME);
         Ok((songs, playlists))
     }
 
@@ -95,7 +95,7 @@ impl Music {
         check_ids(ids)?;
         let from = start.saturating_sub(1).min(ids.len());
         let songs = capped(&ids[from..]);
-        osascript::run(&scripts::replace_queue(songs, true, None)).map(|_| ())
+        osascript::run(&scripts::replace_queue(songs, None, true, None)).map(|_| ())
     }
 
     /// What's in the queue, and whether we're playing from it.
@@ -124,8 +124,20 @@ impl Music {
     /// `scripts::replace_queue`), so whenever something is playing we
     /// rebuild the queue as [current song, …new order…] and restart it at
     /// the same spot. You may hear a tiny skip; the song carries on.
-    pub fn enqueue(&self, ids: &[String], next: bool) -> Result<Queued, MusicError> {
+    ///
+    /// `source` is the playlist the songs were picked from, if any: songs
+    /// that aren't in your library (e.g. liked Apple Music songs) are copied
+    /// from there.
+    pub fn enqueue(
+        &self,
+        ids: &[String],
+        next: bool,
+        source: Option<&str>,
+    ) -> Result<Queued, MusicError> {
         check_ids(ids)?;
+        if let Some(id) = source {
+            check_ids(&[id.to_string()])?;
+        }
         let queue = self.queue()?;
 
         // What's playing right now (only songs from your library can be
@@ -147,7 +159,7 @@ impl Music {
                     None => Vec::new(),
                 };
                 let order = queue_order(Some(current), &upcoming, ids, next);
-                let script = scripts::replace_queue(&order, true, Some((position, paused)));
+                let script = scripts::replace_queue(&order, source, true, Some((position, paused)));
                 osascript::run(&script)?;
                 Ok(if queue.active {
                     Queued::Added
@@ -160,7 +172,7 @@ impl Music {
                 // don't start it.
                 let existing: Vec<String> = queue.songs.into_iter().map(|s| s.id).collect();
                 let order = queue_order(None, &existing, ids, next);
-                osascript::run(&scripts::replace_queue(&order, false, None))?;
+                osascript::run(&scripts::replace_queue(&order, source, false, None))?;
                 Ok(Queued::Ready)
             }
         }

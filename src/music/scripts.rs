@@ -144,43 +144,62 @@ return out as text
     .replace("{CONTAINER}", container)
 }
 
-/// Every normal playlist (no folders, no built-in "Music"/"Library" lists):
-/// `ids ␞ names`, each a list separated by ASCII 31.
+/// Every playlist in your sidebar (no folders, no built-in "Music" or
+/// "Library" lists): `ids ␞ names ␞ kinds`, each a list separated by ASCII 31.
+///
+/// It asks for every `playlist`, not just every `user playlist`: Apple Music
+/// playlists you've added (and your liked songs, "Favorite Songs") are a
+/// different class, `subscription playlist`. The kind column tells them apart.
 pub const PLAYLISTS: &str = r#"
 set US to character id 31
 set RS to character id 30
 tell application "Music"
     -- (Not `names`: Music's dictionary reserves that word.)
-    set plIds to persistent ID of every user playlist whose special kind is none
-    set plNames to name of every user playlist whose special kind is none
+    set plIds to persistent ID of every playlist whose special kind is none
+    set plNames to name of every playlist whose special kind is none
+    set plKinds to class of every playlist whose special kind is none
 end tell
 set AppleScript's text item delimiters to US
 set a to plIds as text
 set b to plNames as text
+set c to plKinds as text
 set AppleScript's text item delimiters to RS
-return {a, b} as text
+return {a, b, c} as text
 "#;
 
 /// AppleScript for "the playlist with this persistent ID".
 pub fn playlist_ref(id: &str) -> String {
-    format!("(first user playlist whose persistent ID is {})", quote(id))
+    // `playlist`, not `user playlist`, so Apple Music playlists work too.
+    format!("(first playlist whose persistent ID is {})", quote(id))
 }
+
+/// Wait (up to 5 s) until Music has actually started playing, plus a short
+/// moment more. Found by testing: a `next track` or `set player position`
+/// sent before playback is under way is silently ignored, and an Apple Music
+/// playlist (streamed) takes much longer to start than songs on your Mac,
+/// so a fixed pause isn't enough.
+const WAIT_FOR_PLAYBACK: &str = "    repeat 50 times
+        if player state is playing then exit repeat
+        delay 0.1
+    end repeat
+    delay 0.3
+";
 
 /// Play a saved playlist starting at song `index` (1 = first).
 ///
 /// Found by testing (M3): `play track 3 of playlist P` plays that one song
 /// *outside* the playlist, so "next" then wanders off elsewhere. Playing the
 /// playlist itself keeps "next" inside it. So we start the playlist and
-/// skip forward. Music ignores a skip sent the instant playback starts,
-/// hence the short `delay`.
+/// skip forward once playback has really started (`WAIT_FOR_PLAYBACK`).
 pub fn play_playlist_at(id: &str, index: usize) -> String {
     let mut s = format!(
         "tell application \"Music\"\n    play {}\n",
         playlist_ref(id)
     );
     if index > 1 {
+        s.push_str(WAIT_FOR_PLAYBACK);
         s.push_str(&format!(
-            "    delay 0.3\n    repeat {} times\n        next track\n    end repeat\n",
+            "    repeat {} times\n        next track\n    end repeat\n",
             index - 1
         ));
     }
@@ -188,59 +207,102 @@ pub fn play_playlist_at(id: &str, index: usize) -> String {
     s
 }
 
-/// Shared opening for every queue script: make sure the queue playlist
-/// exists, and call it `q`.
+/// While the queue is rebuilt, the previous one is kept under this name so
+/// its songs can be copied across, then deleted.
+pub const OLD_QUEUE_NAME: &str = "am · Queue (old)";
+
+/// Shared opening for every queue script: set the current queue aside as
+/// `old` (if there is one) and start a fresh, empty one called `q`.
 const QUEUE_PRELUDE: &str = r#"
 tell application "Music"
-    if not (exists user playlist {QNAME}) then
-        make new user playlist with properties {name:{QNAME}}
+    if exists user playlist {OLDNAME} then delete user playlist {OLDNAME}
+    set old to missing value
+    if exists user playlist {QNAME} then
+        set old to user playlist {QNAME}
+        set name of old to {OLDNAME}
     end if
-    set q to user playlist {QNAME}
+    set q to make new user playlist with properties {name:{QNAME}}
 "#;
 
-/// Copy the tracks with these IDs (in order) onto the end of `q`. A track
-/// that's no longer in the library is skipped instead of stopping the script.
+/// Copy the songs with these IDs, in order, into `q`, then delete `old`.
+///
+/// Each song is looked for in your library first, then in the previous
+/// queue, then in `{SOURCE}` (the playlist you queued from, if any). Found by
+/// testing: most liked songs in an Apple Music "Favorite Songs" playlist
+/// aren't in the library, but they can still be copied from the playlist
+/// itself (without being added to your library). A song found nowhere is
+/// skipped instead of stopping the script.
 const QUEUE_APPEND: &str = r#"
     repeat with pid in {IDS}
+        set found to false
         try
             duplicate (first track of library playlist 1 whose persistent ID is (contents of pid)) to q
+            set found to true
         end try
-    end repeat
+        if not found and old is not missing value then
+            try
+                duplicate (first track of old whose persistent ID is (contents of pid)) to q
+                set found to true
+            end try
+        end if
+{SOURCE}    end repeat
+    if old is not missing value then delete old
 "#;
 
-/// Empty the queue, fill it with `ids`, and (if `play`) start playing it
-/// from the first song. With `resume_at`, jump that many seconds into the
-/// first song, and pause again if `paused`: that's how "play next" carries
-/// on with the song you're already hearing.
+/// The extra lookup in `QUEUE_APPEND` for songs from a particular playlist.
+fn source_lookup(source: Option<&str>) -> String {
+    match source {
+        None => String::new(),
+        Some(id) => format!(
+            "        if not found then
+            try
+                duplicate (first track of {} whose persistent ID is (contents of pid)) to q
+            end try
+        end if
+",
+            playlist_ref(id)
+        ),
+    }
+}
+
+/// Build a fresh queue from `ids` and (if `play`) start playing it from the
+/// first song. `source` is the playlist the songs came from, if they came
+/// from one. With `resume_at`, jump that many seconds into the first song,
+/// and pause again if `paused`: that's how "play next" carries on with the
+/// song you're already hearing.
 ///
 /// Why always rebuild instead of inserting? Found by testing (M4): Music
 /// fixes the playing order when a playlist *starts*, and ignores songs added
 /// to it afterwards. Restarting the rebuilt queue is the only reliable way.
 /// (And `play q`, not `play track 1 of q`, for the reason given at
 /// `play_playlist_at`.)
-pub fn replace_queue(ids: &[String], play: bool, resume_at: Option<(f64, bool)>) -> String {
+pub fn replace_queue(
+    ids: &[String],
+    source: Option<&str>,
+    play: bool,
+    resume_at: Option<(f64, bool)>,
+) -> String {
     let mut s = String::from(QUEUE_PRELUDE);
-    s.push_str("    try\n        delete every track of q\n    end try\n");
-    s.push_str(QUEUE_APPEND);
+    s.push_str(&QUEUE_APPEND.replace("{SOURCE}", &source_lookup(source)));
     if play {
         s.push_str("    play q\n");
         if let Some((pos, paused)) = resume_at {
             // `{:.1}` = one decimal place, always written with a "." which is
             // what AppleScript *source code* expects (whatever your region).
-            s.push_str(&format!(
-                "    delay 0.3\n    set player position to {pos:.1}\n"
-            ));
+            s.push_str(WAIT_FOR_PLAYBACK);
+            s.push_str(&format!("    set player position to {pos:.1}\n"));
             if paused {
                 s.push_str("    pause\n");
             }
         }
     }
     s.push_str("end tell\n");
-    fill_queue_template(s, ids)
+    script_with(s, ids)
 }
 
-fn fill_queue_template(script: String, ids: &[String]) -> String {
+fn script_with(script: String, ids: &[String]) -> String {
     script
+        .replace("{OLDNAME}", &quote(OLD_QUEUE_NAME))
         .replace("{QNAME}", &quote(QUEUE_NAME))
         .replace("{IDS}", &quote_list(ids))
 }
@@ -348,12 +410,14 @@ mod tests {
         let scripts = [
             tracks_of("library playlist 1"),
             play_playlist_at("ABC", 3),
-            replace_queue(&["A".into()], true, Some((12.5, true))),
+            replace_queue(&["A".into()], Some("P1"), true, Some((12.5, true))),
             queue_state(),
             save_artwork("/tmp/x"),
         ];
         for s in scripts {
             for placeholder in [
+                "{OLDNAME}",
+                "{SOURCE}",
                 "{CONTAINER}",
                 "{INDEX}",
                 "{PLAYLIST}",
@@ -368,21 +432,39 @@ mod tests {
 
     #[test]
     fn replace_queue_resumes_with_a_dot_decimal() {
-        let s = replace_queue(&["A".into()], true, Some((12.25, true)));
+        let s = replace_queue(&["A".into()], None, true, Some((12.25, true)));
         assert!(s.contains("play q"));
         assert!(
             s.contains("set player position to 12.2") || s.contains("set player position to 12.3")
         );
         assert!(s.contains("    pause\n"));
-        let s = replace_queue(&["A".into()], false, None);
+        let s = replace_queue(&["A".into()], None, false, None);
         assert!(!s.contains("play q"));
+    }
+
+    #[test]
+    fn queue_songs_can_come_from_the_source_playlist() {
+        let with = replace_queue(&["A".into()], Some("ABC"), false, None);
+        assert!(
+            with.contains(
+                "duplicate (first track of (first playlist whose persistent ID is \"ABC\")"
+            )
+        );
+        let without = replace_queue(&["A".into()], None, false, None);
+        assert!(!without.contains("first playlist whose"));
+        // Both look in the library and the previous queue, then tidy up.
+        for s in [with, without] {
+            assert!(s.contains("first track of library playlist 1"));
+            assert!(s.contains("first track of old"));
+            assert!(s.contains("if old is not missing value then delete old"));
+        }
     }
 
     #[test]
     fn playing_a_playlist_from_song_3_skips_twice_after_a_pause() {
         let s = play_playlist_at("ABC", 3);
-        assert!(s.contains("play (first user playlist whose persistent ID is \"ABC\")"));
-        assert!(s.contains("delay 0.3"));
+        assert!(s.contains("play (first playlist whose persistent ID is \"ABC\")"));
+        assert!(s.contains("if player state is playing then exit repeat"));
         assert!(s.contains("repeat 2 times"));
         assert!(
             !play_playlist_at("ABC", 1).contains("repeat"),

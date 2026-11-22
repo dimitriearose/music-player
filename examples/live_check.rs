@@ -46,16 +46,16 @@ fn main() {
     let lib = library::Library::new(songs, playlists);
     let ids: Vec<String> = lib.songs.iter().take(5).map(|s| s.id.clone()).collect();
     let _ = music::osascript::run("tell application \"Music\" to stop");
-    music::osascript::run(&music::scripts::replace_queue(&[], false, None)).unwrap();
+    music::osascript::run(&music::scripts::replace_queue(&[], None, false, None)).unwrap();
 
     // Queue while stopped, then start it from the Queue tab (play_queue_at).
     check(
         "enqueue while stopped → Ready",
-        m.enqueue(&ids[..2], false).unwrap() == Queued::Ready,
+        m.enqueue(&ids[..2], false, None).unwrap() == Queued::Ready,
     );
     check(
         "…then add 1 more at the end",
-        m.enqueue(&ids[2..3], false).unwrap() == Queued::Ready,
+        m.enqueue(&ids[2..3], false, None).unwrap() == Queued::Ready,
     );
     let order: Vec<String> = m.queue().unwrap().songs.into_iter().map(|s| s.id).collect();
     check("queue is 1, 2, 3", order == ids[..3]);
@@ -75,7 +75,7 @@ fn main() {
     let before = status(&m).position;
     check(
         "play next while in queue → Added",
-        m.enqueue(&ids[3..4], true).unwrap() == Queued::Added,
+        m.enqueue(&ids[3..4], true, None).unwrap() == Queued::Added,
     );
     wait();
     let s = status(&m);
@@ -90,7 +90,7 @@ fn main() {
         ),
         (s.position - before).abs() < 4.0,
     );
-    m.enqueue(&ids[4..5], false).unwrap();
+    m.enqueue(&ids[4..5], false, None).unwrap();
     wait();
     m.next().unwrap();
     wait();
@@ -169,7 +169,7 @@ fn main() {
         let before = status(&m);
         check(
             "play next from a playlist → Started",
-            m.enqueue(&ids[..1], true).unwrap() == Queued::Started,
+            m.enqueue(&ids[..1], true, None).unwrap() == Queued::Started,
         );
         wait();
         let after = status(&m);
@@ -185,10 +185,66 @@ fn main() {
         );
     }
 
+    // An Apple Music playlist (streamed, slower to start) from song 3.
+    if let Some(p) = lib.playlists.iter().find(|p| p.apple_music) {
+        let ps: Vec<String> = m
+            .playlist_songs(&p.id)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        if ps.len() >= 3 {
+            m.play_playlist(&p.id, 3).unwrap();
+            wait();
+            check(
+                "play an Apple Music playlist from song 3",
+                now_id(&m).as_ref() == Some(&ps[2]),
+            );
+        }
+    }
+
+    // Liked songs that aren't in the library: copied from their playlist,
+    // and still there after the queue is rebuilt for another song.
+    if let Some(p) = lib
+        .playlists
+        .iter()
+        .find(|p| p.apple_music && p.name == "Favorite Songs")
+    {
+        let in_library: std::collections::HashSet<&String> =
+            lib.songs.iter().map(|s| &s.id).collect();
+        let outside: Vec<String> = m
+            .playlist_songs(&p.id)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.id)
+            .filter(|id| !in_library.contains(id))
+            .take(2)
+            .collect();
+        if outside.len() == 2 {
+            let _ = music::osascript::run("tell application \"Music\" to stop");
+            music::osascript::run(&music::scripts::replace_queue(&[], None, false, None)).unwrap();
+            m.enqueue(&outside, false, Some(&p.id)).unwrap();
+            m.enqueue(&ids[..1], false, None).unwrap(); // rebuild without the source
+            let q: Vec<String> = m.queue().unwrap().songs.into_iter().map(|s| s.id).collect();
+            check(
+                "liked songs outside the library get queued, and survive a rebuild",
+                q == vec![outside[0].clone(), outside[1].clone(), ids[0].clone()],
+            );
+            m.play_queue_at(1).unwrap();
+            wait();
+            check("…and play", now_id(&m).as_ref() == Some(&outside[0]));
+            let size = m.library().unwrap().0.len();
+            check(
+                &format!("…without being added to the library ({size} songs)"),
+                size == lib.songs.len(),
+            );
+        }
+    }
+
     // Paused "play next" should stay paused.
     m.play_pause().unwrap();
     settle();
-    m.enqueue(&ids[1..2], true).unwrap();
+    m.enqueue(&ids[1..2], true, None).unwrap();
     wait();
     check(
         "play next while paused stays paused",
@@ -206,7 +262,7 @@ fn main() {
 
     // Leave things as we found them.
     let _ = music::osascript::run("tell application \"Music\" to stop");
-    music::osascript::run(&music::scripts::replace_queue(&[], false, None)).unwrap();
+    music::osascript::run(&music::scripts::replace_queue(&[], None, false, None)).unwrap();
     m.set_volume(original_volume).unwrap();
     check(
         &format!("stopped, queue emptied, volume back to {original_volume}"),
