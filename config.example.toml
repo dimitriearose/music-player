@@ -1,0 +1,30 @@
+# Settings for `am`. Every line is optional: delete one to use the default.
+#
+# Where this file lives (it is NOT read from the project folder, so your
+# playlist names never end up in git):
+#   ~/.config/am/config.toml
+# `am --config` prints the exact path and the settings in use, and
+# `am --init-config` creates the file from this example.
+#
+# Each setting can also come from an environment variable, which wins over
+# the file. Handy for trying something once, e.g.
+#   AM_FAVORITES="Morning Run, Focus" am
+
+# Playlists pinned to the top of the Playlists tab (marked ★), in this order.
+# On the main screen, keys 1–9 play the 1st–9th favorite.
+# Names are matched ignoring capitals. If two playlists share a name (you can
+# have your own "Favorite Songs" and Apple Music's), both are pinned.
+# Env: AM_FAVORITES="Morning Run, Focus"   (comma-separated)
+favorites = ["Morning Run", "Focus"]
+
+# Show album art when `am` starts (the `a` key still toggles it).
+# Env: AM_SHOW_ART=false
+show_art = true
+
+# Seconds jumped by ← / → (1–60).
+# Env: AM_SEEK_SECONDS=10
+seek_seconds = 5
+
+# Volume change for + / - (1–25).
+# Env: AM_VOLUME_STEP=10
+volume_step = 5
