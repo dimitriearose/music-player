@@ -2,10 +2,12 @@
 
 use super::{BOLD, DIM, centered};
 use crate::app::{App, format_time};
+use crate::art::{Art, color};
 use crate::music::{PlayState, Repeat};
 use ratatui::{
     Frame,
     layout::Rect,
+    style::Style,
     text::{Line, Span},
 };
 use std::time::Instant;
@@ -57,7 +59,36 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         status.repeat,
     ));
 
+    // Album art goes on top, but only if the window is tall enough for it
+    // *and* the text; otherwise the text wins and the art is skipped.
+    if let Some(art) = app.current_art() {
+        let art_lines = art_lines(art, app.truecolor);
+        if (area.height as usize) >= lines.len() + art_lines.len() + 2 {
+            let mut all = art_lines;
+            all.push(Line::raw(""));
+            all.append(&mut lines); // `append` moves every line from `lines` onto the end
+            lines = all;
+        }
+    }
+
     centered(frame, area, lines);
+}
+
+/// Turn the artwork into lines of `▀` characters: each character's
+/// foreground is one pixel and its background the pixel below it.
+fn art_lines(art: &Art, truecolor: bool) -> Vec<Line<'static>> {
+    (0..art.size / 2)
+        .map(|row| {
+            let spans: Vec<Span> = (0..art.size)
+                .map(|x| {
+                    let top = color(art.pixel(x, row * 2), truecolor);
+                    let bottom = color(art.pixel(x, row * 2 + 1), truecolor);
+                    Span::styled("▀", Style::new().fg(top).bg(bottom))
+                })
+                .collect();
+            Line::from(spans)
+        })
+        .collect()
 }
 
 /// "Artist — Album", leaving out whichever part is empty.
@@ -103,6 +134,18 @@ fn state_line(state: PlayState, volume: u8, shuffle: bool, repeat: Repeat) -> Li
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn art_is_half_as_tall_as_it_is_wide() {
+        let art = Art {
+            size: 4,
+            pixels: vec![[10, 20, 30]; 16],
+        };
+        let lines = art_lines(&art, true);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].spans.len(), 4);
+        assert_eq!(lines[0].spans[0].content, "▀");
+    }
 
     #[test]
     fn bar_fills_proportionally() {

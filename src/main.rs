@@ -11,7 +11,11 @@
 //! this way.
 
 mod app;
+mod art;
+mod check;
+mod library;
 mod music;
+mod popup;
 mod ui;
 mod worker;
 
@@ -32,6 +36,13 @@ const TICK: Duration = Duration::from_millis(100);
 /// kind of error". If `main` returns an error, Rust prints it and exits with a
 /// non-zero status.
 fn main() -> anyhow::Result<()> {
+    // `am --check` runs a read-only self-test instead of the full-screen app.
+    // `std::env::args()` is the list of words typed after the program name
+    // (`nth(1)` = the first one).
+    if std::env::args().nth(1).as_deref() == Some("--check") {
+        return check::run();
+    }
+
     let (commands, updates) = worker::spawn(music::Music::new());
 
     // `ratatui::init()` enters the "alternate screen" (so your shell history
@@ -54,6 +65,7 @@ fn run(
     updates: &Receiver<Update>,
 ) -> anyhow::Result<()> {
     let mut app = App::new(Instant::now());
+    app.truecolor = art::truecolor_supported();
 
     while !app.should_quit {
         // 1. Apply everything the worker has sent since last time.

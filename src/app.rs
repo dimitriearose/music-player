@@ -4,9 +4,13 @@
 //! plain logic, which makes it easy to unit-test: feed in keys and updates,
 //! check the state that comes out.
 
-use crate::music::{MusicError, PlayState, PlayerStatus, Repeat};
+use crate::art::Art;
+use crate::library::Library;
+use crate::music::{MusicError, PlayState, PlayerStatus, QueueInfo, Repeat, Song, Speaker};
+use crate::popup::{self, Action, Data, Popup, Queueable, Row, Tab, View};
 use crate::worker::{Command, Update};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// How long an error/notice stays on the bottom line.
@@ -44,6 +48,23 @@ pub struct App {
     /// How many commands we've sent to the worker (see `apply`).
     sent: u64,
     pub should_quit: bool,
+
+    // ── Milestones 3–6 ──
+    /// The library pop-up, when it's open.
+    pub popup: Option<Popup>,
+    /// Your library, once the worker has loaded it.
+    pub library: Option<Library>,
+    /// Songs of playlists you've opened, by playlist ID. (A `HashMap` is a
+    /// lookup table: give it a key, get the value back quickly.)
+    pub playlist_songs: HashMap<String, Vec<Song>>,
+    pub queue: Option<QueueInfo>,
+    pub speakers: Option<Vec<Speaker>>,
+    /// Artwork and the ID of the song it belongs to.
+    pub art: Option<(String, Art)>,
+    /// The `a` key toggles this.
+    pub show_art: bool,
+    /// Can the terminal show exact colours? (See `art::truecolor_supported`.)
+    pub truecolor: bool,
 }
 
 impl App {
@@ -59,7 +80,42 @@ impl App {
             show_help: false,
             sent: 0,
             should_quit: false,
+            popup: None,
+            library: None,
+            playlist_songs: HashMap::new(),
+            queue: None,
+            speakers: None,
+            art: None,
+            show_art: true,
+            truecolor: false,
         }
+    }
+
+    /// The artwork for the song playing now, if we have it and it's wanted.
+    pub fn current_art(&self) -> Option<&Art> {
+        if !self.show_art {
+            return None;
+        }
+        let playing = self.status.as_ref()?.track.as_ref()?;
+        match &self.art {
+            Some((id, art)) if *id == playing.id => Some(art),
+            _ => None,
+        }
+    }
+
+    /// Bundle up what the pop-up needs to build its rows.
+    pub fn data(&self) -> Data<'_> {
+        Data {
+            library: self.library.as_ref(),
+            playlist_songs: &self.playlist_songs,
+            queue: self.queue.as_ref(),
+            speakers: self.speakers.as_deref(),
+        }
+    }
+
+    /// Put a short notice on the bottom line.
+    fn notice(&mut self, text: &str, now: Instant) {
+        self.message = Some((text.to_string(), now));
     }
 
     /// Decide what a key press means. Returns a command for the worker, if any.
@@ -68,7 +124,7 @@ impl App {
     /// with what we expect to happen (e.g. the volume number goes up), so the
     /// app feels instant even though Music takes ~100 ms to respond.
     pub fn handle_key(&mut self, key: KeyEvent, now: Instant) -> Option<Command> {
-        let cmd = self.command_for(key)?; // `?` on an Option: return None if None
+        let cmd = self.command_for(key, now)?; // `?` on an Option: return None if None
         self.predict(&cmd, now);
         self.sent += 1;
         Some(cmd)
@@ -76,7 +132,7 @@ impl App {
 
     /// The key → command table. Keys that only change the screen (like `?`)
     /// are handled here too and return `None`.
-    fn command_for(&mut self, key: KeyEvent) -> Option<Command> {
+    fn command_for(&mut self, key: KeyEvent, now: Instant) -> Option<Command> {
         // In "raw mode" the terminal no longer turns Ctrl-C into "stop the
         // program", so we handle it ourselves.
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -84,7 +140,21 @@ impl App {
             return None;
         }
 
+        // While the pop-up is open it gets every key.
+        if self.popup.is_some() {
+            return self.popup_key(key, now);
+        }
+
         match key.code {
+            KeyCode::Char('/') => {
+                self.show_help = false;
+                self.popup = Some(Popup::new());
+                return None;
+            }
+            KeyCode::Char('a') => {
+                self.show_art = !self.show_art;
+                return None;
+            }
             KeyCode::Char('q') => {
                 self.should_quit = true;
                 return None;
@@ -133,6 +203,15 @@ impl App {
     /// Update our copy of the status to what `cmd` will do, before Music
     /// confirms it.
     fn predict(&mut self, cmd: &Command, now: Instant) {
+        // Flip a speaker's dot straight away; the worker re-reads them after.
+        if let Command::SetSpeaker { name, on } = cmd
+            && let Some(speakers) = &mut self.speakers
+        {
+            for sp in speakers.iter_mut().filter(|sp| &sp.name == name) {
+                sp.selected = *on;
+            }
+        }
+
         // Work out the current position *before* borrowing `status` mutably.
         // (Rust won't let us read `self` while we hold a mutable borrow of
         // part of it, so the order matters.)
@@ -156,9 +235,10 @@ impl App {
             Command::SetVolume(v) => s.volume = *v,
             Command::ToggleShuffle => s.shuffle = !s.shuffle,
             Command::CycleRepeat => s.repeat = next_repeat(s.repeat),
-            // Next/previous: we can't know the next song, so just wait for
-            // the poll. LaunchMusic: nothing to predict.
-            Command::Next | Command::Previous | Command::LaunchMusic => {}
+            // Everything else: we can't know the result in advance (e.g. the
+            // next song), so we just wait for the worker to tell us.
+            // Rust note: `_` matches all remaining cases.
+            _ => {}
         }
     }
 
@@ -185,6 +265,171 @@ impl App {
                 self.connection = Connection::PermissionDenied;
             }
             Update::Error(e) => self.message = Some((e.to_string(), now)),
+            Update::Notice(text) => self.notice(&text, now),
+            Update::Library(lib) => self.library = Some(lib),
+            Update::PlaylistSongs { id, songs } => {
+                self.playlist_songs.insert(id, songs);
+            }
+            Update::Queue(q) => self.queue = Some(q),
+            Update::Speakers(s) => self.speakers = Some(s),
+            Update::Art { track_id, art } => {
+                // `map` only runs if there *is* art: Some(art) → Some((id, art)).
+                self.art = art.map(|a| (track_id, a));
+            }
+        }
+    }
+
+    /// Keys while the library pop-up is open.
+    ///
+    /// In the Search tab's main list, letters type into the search box. Everywhere
+    /// else they're shortcuts (j/k to move, . to play next, …). Ctrl
+    /// combinations work everywhere.
+    fn popup_key(&mut self, key: KeyEvent, now: Instant) -> Option<Command> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // Build the rows first, then take what we need from them, so we're not
+        // still borrowing `self` when we change it below.
+        let rows = popup::rows(self.popup.as_ref()?, &self.data());
+        let last = rows.len().saturating_sub(1);
+        let (typing, selected) = {
+            let p = self.popup.as_ref()?;
+            (p.typing(), p.selected.min(last))
+        };
+        let row: Option<Row> = rows.get(selected).cloned();
+
+        // Queue keys: ctrl-n / . = play next, ctrl-a / Q = add to the end.
+        let queue_next = match key.code {
+            KeyCode::Char('n') if ctrl => Some(true),
+            KeyCode::Char('a') if ctrl => Some(false),
+            KeyCode::Char('.') if !typing => Some(true),
+            KeyCode::Char('Q') if !typing => Some(false),
+            _ => None,
+        };
+        if let Some(next) = queue_next {
+            let ids = row
+                .map(|r| self.resolve_queue(&r.queue))
+                .unwrap_or_default();
+            if ids.is_empty() {
+                self.notice("Nothing to queue here (open a playlist first)", now);
+                return None;
+            }
+            return Some(Command::Enqueue { ids, next });
+        }
+
+        let enter = match key.code {
+            KeyCode::Enter => true,
+            KeyCode::Right | KeyCode::Char('l') if !typing => true,
+            _ => false,
+        };
+        if enter {
+            return row.and_then(|r| self.activate(r.action));
+        }
+
+        let p = self.popup.as_mut()?;
+        match key.code {
+            KeyCode::Char('r') if ctrl => return Some(Command::LoadLibrary),
+            KeyCode::Esc => {
+                if p.view == View::List {
+                    self.popup = None;
+                } else {
+                    p.view = View::List;
+                    p.selected = 0;
+                }
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                p.tab = if key.code == KeyCode::Tab {
+                    p.tab.next()
+                } else {
+                    p.tab.prev()
+                };
+                p.view = View::List;
+                p.selected = 0;
+                // Queue and speakers can change at any time, so re-read them
+                // every time you visit the tab.
+                return match p.tab {
+                    Tab::Queue => Some(Command::LoadQueue),
+                    Tab::Speakers => Some(Command::LoadSpeakers),
+                    _ => None,
+                };
+            }
+            KeyCode::Up => p.selected = selected.saturating_sub(1),
+            KeyCode::Down => p.selected = (selected + 1).min(last),
+            KeyCode::PageUp => p.selected = selected.saturating_sub(10),
+            KeyCode::PageDown => p.selected = (selected + 10).min(last),
+            KeyCode::Backspace if typing => {
+                p.query.pop();
+                p.selected = 0;
+            }
+            KeyCode::Char(c) if typing && !ctrl => {
+                p.query.push(c);
+                p.selected = 0;
+            }
+            // From here on: browsing (not typing).
+            KeyCode::Char('k') => p.selected = selected.saturating_sub(1),
+            KeyCode::Char('j') => p.selected = (selected + 1).min(last),
+            KeyCode::Char('g') => p.selected = 0,
+            KeyCode::Char('G') => p.selected = last,
+            KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+                if p.view != View::List {
+                    p.view = View::List;
+                    p.selected = 0;
+                }
+            }
+            KeyCode::Char('q') => self.popup = None,
+            _ => {}
+        }
+        None
+    }
+
+    /// Do what Enter means for a row.
+    fn activate(&mut self, action: Action) -> Option<Command> {
+        match action {
+            Action::Open(view) => {
+                // A playlist's songs are fetched the first time you open it.
+                let load = match &view {
+                    View::Playlist { id, .. } if !self.playlist_songs.contains_key(id) => {
+                        Some(Command::LoadPlaylist(id.clone()))
+                    }
+                    _ => None,
+                };
+                if let Some(p) = &mut self.popup {
+                    p.view = view;
+                    p.selected = 0;
+                }
+                load
+            }
+            // Playing something closes the pop-up: back to the quiet screen.
+            Action::PlaySongs { ids, start } => {
+                self.popup = None;
+                Some(Command::PlaySongs { ids, start })
+            }
+            Action::PlayPlaylist { id, index } => {
+                self.popup = None;
+                Some(Command::PlayPlaylist { id, index })
+            }
+            Action::PlayQueueAt(index) => {
+                self.popup = None;
+                Some(Command::PlayQueueAt(index))
+            }
+            // Speakers stay open, so you can switch several on or off.
+            Action::ToggleSpeaker { name, on } => Some(Command::SetSpeaker { name, on }),
+            Action::Nothing => None,
+        }
+    }
+
+    /// The song IDs a row stands for when queueing.
+    fn resolve_queue(&self, q: &Queueable) -> Vec<String> {
+        let ids = |songs: Vec<Song>| -> Vec<String> { songs.into_iter().map(|s| s.id).collect() };
+        match (q, &self.library) {
+            (Queueable::Songs(ids), _) => ids.clone(),
+            (Queueable::Album(key), Some(lib)) => ids(lib.album_songs(key)),
+            (Queueable::Artist(name), Some(lib)) => ids(lib.artist_songs(name)),
+            (Queueable::Playlist(id), _) => self
+                .playlist_songs
+                .get(id)
+                .cloned()
+                .map(ids)
+                .unwrap_or_default(),
+            _ => Vec::new(),
         }
     }
 
@@ -400,6 +645,184 @@ mod tests {
             now,
         );
         assert_eq!(app.status.as_ref().unwrap().volume, 54);
+    }
+
+    /// Simulate typing a string, one key at a time.
+    fn type_text(app: &mut App, text: &str, now: Instant) {
+        for c in text.chars() {
+            app.handle_key(key(c), now);
+        }
+    }
+
+    fn app_with_library(now: Instant) -> App {
+        let mut app = connected_app(now);
+        let songs = vec![
+            Song {
+                id: "A1".into(),
+                name: "Alpha".into(),
+                artist: "Band".into(),
+                album: "Record".into(),
+                album_artist: String::new(),
+                duration: 100.0,
+                disc: 1,
+                number: 1,
+            },
+            Song {
+                id: "B2".into(),
+                name: "Beta".into(),
+                artist: "Band".into(),
+                album: "Record".into(),
+                album_artist: String::new(),
+                duration: 100.0,
+                disc: 1,
+                number: 2,
+            },
+        ];
+        app.apply(Update::Library(Library::new(songs, vec![])), now);
+        app
+    }
+
+    #[test]
+    fn slash_opens_search_and_letters_type() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        app.handle_key(key('/'), now);
+        // While typing, `n` and space are letters, not next/play-pause.
+        type_text(&mut app, "n b", now);
+        assert_eq!(app.popup.as_ref().unwrap().query, "n b");
+        app.handle_key(KeyEvent::from(KeyCode::Backspace), now);
+        assert_eq!(app.popup.as_ref().unwrap().query, "n ");
+    }
+
+    #[test]
+    fn enter_on_a_search_result_plays_and_closes() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        app.handle_key(key('/'), now);
+        type_text(&mut app, "beta", now);
+        let cmd = app.handle_key(KeyEvent::from(KeyCode::Enter), now);
+        assert_eq!(
+            cmd,
+            Some(Command::PlaySongs {
+                ids: vec!["B2".into()],
+                start: 1
+            })
+        );
+        assert!(app.popup.is_none(), "pop-up closes after playing");
+    }
+
+    #[test]
+    fn opening_an_album_then_queueing_a_song() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        app.handle_key(key('/'), now);
+        app.handle_key(KeyEvent::from(KeyCode::Tab), now); // Playlists
+        app.handle_key(KeyEvent::from(KeyCode::Tab), now); // Albums
+        app.handle_key(KeyEvent::from(KeyCode::Enter), now); // open "Record"
+        assert!(matches!(app.popup.as_ref().unwrap().view, View::Album(_)));
+
+        app.handle_key(key('j'), now); // second song
+        assert_eq!(
+            app.handle_key(key('.'), now),
+            Some(Command::Enqueue {
+                ids: vec!["B2".into()],
+                next: true
+            })
+        );
+        // Esc goes back to the album list, then closes.
+        app.handle_key(KeyEvent::from(KeyCode::Esc), now);
+        assert_eq!(app.popup.as_ref().unwrap().view, View::List);
+        app.handle_key(KeyEvent::from(KeyCode::Esc), now);
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn ctrl_a_on_an_album_queues_the_whole_album() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        app.handle_key(key('/'), now);
+        app.handle_key(KeyEvent::from(KeyCode::BackTab), now); // Speakers
+        app.handle_key(KeyEvent::from(KeyCode::BackTab), now); // Queue
+        app.handle_key(KeyEvent::from(KeyCode::BackTab), now); // Artists
+        app.handle_key(KeyEvent::from(KeyCode::BackTab), now); // Albums
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        assert_eq!(
+            app.handle_key(ctrl_a, now),
+            Some(Command::Enqueue {
+                ids: vec!["A1".into(), "B2".into()],
+                next: false
+            })
+        );
+    }
+
+    #[test]
+    fn visiting_queue_and_speaker_tabs_refreshes_them() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        app.handle_key(key('/'), now);
+        let tab = || KeyEvent::from(KeyCode::Tab);
+        for _ in 0..3 {
+            app.handle_key(tab(), now); // Playlists, Albums, Artists
+        }
+        assert_eq!(app.handle_key(tab(), now), Some(Command::LoadQueue));
+        assert_eq!(app.handle_key(tab(), now), Some(Command::LoadSpeakers));
+    }
+
+    #[test]
+    fn toggling_a_speaker_flips_its_dot_immediately() {
+        let now = Instant::now();
+        let mut app = connected_app(now);
+        app.apply(
+            Update::Speakers(vec![Speaker {
+                name: "Kitchen".into(),
+                kind: "HomePod".into(),
+                selected: false,
+                available: true,
+            }]),
+            now,
+        );
+        app.popup = Some(Popup {
+            tab: Tab::Speakers,
+            ..Popup::new()
+        });
+        let cmd = app.handle_key(KeyEvent::from(KeyCode::Enter), now);
+        assert_eq!(
+            cmd,
+            Some(Command::SetSpeaker {
+                name: "Kitchen".into(),
+                on: true
+            })
+        );
+        assert!(app.speakers.as_ref().unwrap()[0].selected);
+        assert!(app.popup.is_some(), "speakers tab stays open");
+    }
+
+    #[test]
+    fn art_only_shows_for_the_current_song_and_can_be_hidden() {
+        let now = Instant::now();
+        let mut app = connected_app(now); // playing track id "X"
+        let art = Art {
+            size: 1,
+            pixels: vec![[0, 0, 0]],
+        };
+        app.apply(
+            Update::Art {
+                track_id: "OTHER".into(),
+                art: Some(art.clone()),
+            },
+            now,
+        );
+        assert!(app.current_art().is_none(), "art for a different song");
+        app.apply(
+            Update::Art {
+                track_id: "X".into(),
+                art: Some(art),
+            },
+            now,
+        );
+        assert!(app.current_art().is_some());
+        app.handle_key(key('a'), now);
+        assert!(app.current_art().is_none(), "hidden with `a`");
     }
 
     #[test]

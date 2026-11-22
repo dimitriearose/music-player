@@ -17,6 +17,8 @@ const KEYS: &[(&str, &str)] = &[
     ("+  -", "volume up / down"),
     ("s", "shuffle on / off"),
     ("r", "repeat: off → all → one"),
+    ("/", "library: search, browse, queue, speakers"),
+    ("a", "album art on / off"),
     ("o", "open Music (if closed)"),
     ("?  esc", "close this list"),
     ("q", "quit (Music keeps playing)"),

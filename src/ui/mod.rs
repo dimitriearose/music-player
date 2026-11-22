@@ -7,6 +7,7 @@
 
 mod help;
 mod now_playing;
+mod popup;
 
 use crate::app::{App, Connection};
 use ratatui::{
@@ -74,6 +75,9 @@ pub fn draw(frame: &mut Frame, app: &App, now: Instant) {
     );
 
     // Drawn last so it sits on top of everything else.
+    if app.popup.is_some() {
+        popup::draw(frame, area, app);
+    }
     if app.show_help {
         help::draw(frame, area);
     }
