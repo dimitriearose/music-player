@@ -30,6 +30,12 @@ pub enum Command {
     PlayPause,
     Next,
     Previous,
+    /// Jump forwards/backwards by this many seconds.
+    Seek(i32),
+    /// Set the volume to exactly this value (0–100).
+    SetVolume(u8),
+    ToggleShuffle,
+    CycleRepeat,
     /// Start Music.app hidden (the `o` key).
     LaunchMusic,
 }
@@ -37,7 +43,16 @@ pub enum Command {
 /// News from the worker to the UI.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Update {
-    Status(PlayerStatus),
+    /// A fresh status, plus how many commands the worker had finished when it
+    /// fetched it. The app uses `acked` to ignore statuses that are older than
+    /// a key you just pressed (see `App::apply`).
+    ///
+    /// Rust note: this is a *struct variant*: an enum case with named
+    /// fields, like a small struct.
+    Status {
+        status: PlayerStatus,
+        acked: u64,
+    },
     NotRunning,
     /// We've asked macOS to start Music and are waiting for it.
     Launching,
@@ -63,13 +78,16 @@ fn run(music: Music, commands: Receiver<Command>, updates: Sender<Update>) {
     // When we last launched Music (if we're still waiting for it to start).
     let mut launched_at: Option<Instant> = None;
     let mut first_poll = true;
+    // How many commands we've finished. `u64` is a 64-bit unsigned number;
+    // it will never overflow in practice.
+    let mut acked: u64 = 0;
 
     loop {
         // 1. Ask Music what's going on and tell the UI.
         let update = match music.status() {
             Ok(StatusReply::Status(s)) => {
                 launched_at = None;
-                Update::Status(s)
+                Update::Status { status: s, acked }
             }
             Ok(StatusReply::NotRunning) | Err(MusicError::NotRunning) => {
                 if first_poll {
@@ -90,19 +108,27 @@ fn run(music: Music, commands: Receiver<Command>, updates: Sender<Update>) {
             return;
         }
 
-        // 2. Wait up to POLL_INTERVAL for a command. If one arrives we run it
-        //    and loop straight back to polling, so the screen updates quickly
-        //    after you press a key.
-        match commands.recv_timeout(POLL_INTERVAL) {
-            Ok(Command::LaunchMusic) => launched_at = Some(launch(&music, &updates)),
-            Ok(cmd) => {
-                if let Err(e) = execute(&music, &cmd) {
-                    let _ = updates.send(Update::Error(e));
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            // The UI dropped its end of the channel: time to stop.
+        // 2. Wait up to POLL_INTERVAL for a command. If none arrives, loop
+        //    round and poll again.
+        let first = match commands.recv_timeout(POLL_INTERVAL) {
+            Ok(cmd) => cmd,
+            Err(RecvTimeoutError::Timeout) => continue, // nothing to do: poll again
             Err(RecvTimeoutError::Disconnected) => return,
+        };
+
+        // 3. Run that command, then any others that piled up meanwhile (e.g.
+        //    you're holding `+`), *before* polling. Polling between each one
+        //    would make held keys lag behind.
+        //
+        //    `std::iter::once(first).chain(commands.try_iter())` means "the
+        //    first command, followed by every command already waiting".
+        for cmd in std::iter::once(first).chain(commands.try_iter()) {
+            if cmd == Command::LaunchMusic {
+                launched_at = Some(launch(&music, &updates));
+            } else if let Err(e) = execute(&music, &cmd) {
+                let _ = updates.send(Update::Error(e));
+            }
+            acked += 1;
         }
     }
 }
@@ -122,6 +148,10 @@ fn execute(music: &Music, cmd: &Command) -> Result<(), MusicError> {
         Command::PlayPause => music.play_pause(),
         Command::Next => music.next(),
         Command::Previous => music.previous(),
+        Command::Seek(seconds) => music.seek_by(*seconds),
+        Command::SetVolume(v) => music.set_volume(*v),
+        Command::ToggleShuffle => music.toggle_shuffle(),
+        Command::CycleRepeat => music.cycle_repeat(),
         Command::LaunchMusic => music.launch_hidden(),
     }
 }

@@ -5,6 +5,7 @@
 //! Rust note: this way of building UIs (state in, picture out, no hidden
 //! widget state) is called "immediate mode".
 
+mod help;
 mod now_playing;
 
 use crate::app::{App, Connection};
@@ -64,12 +65,18 @@ pub fn draw(frame: &mut Frame, app: &App, now: Instant) {
     // Bottom line: a fading notice if there is one, otherwise the key hints.
     let bottom_line = match app.message(now) {
         Some(msg) => Line::styled(msg.to_string(), Style::new().fg(Color::Yellow)),
-        None => Line::styled("space play/pause   n next   p previous   q quit", DIM),
+        // Just a quiet pointer to the key list; the list itself is behind `?`.
+        None => Line::styled("? keys", DIM),
     };
     frame.render_widget(
         Paragraph::new(bottom_line).alignment(Alignment::Center),
         bottom,
     );
+
+    // Drawn last so it sits on top of everything else.
+    if app.show_help {
+        help::draw(frame, area);
+    }
 }
 
 /// Draw some lines in the middle of `area`, both horizontally and vertically.

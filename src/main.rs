@@ -71,7 +71,7 @@ fn run(
             // Only react to key *presses* (not releases or repeats-as-release).
             if let Event::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
-                && let Some(cmd) = app.handle_key(key)
+                && let Some(cmd) = app.handle_key(key, Instant::now())
             {
                 // If the worker has died, sending fails; there's nothing
                 // useful to do about that here, so we ignore it.

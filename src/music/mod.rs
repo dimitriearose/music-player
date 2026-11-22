@@ -128,6 +128,24 @@ impl Music {
         osascript::run(scripts::PREVIOUS).map(|_| ())
     }
 
+    /// Jump forwards (positive) or backwards (negative) by whole seconds.
+    pub fn seek_by(&self, seconds: i32) -> Result<(), MusicError> {
+        osascript::run(&scripts::seek_by(seconds)).map(|_| ())
+    }
+
+    /// 0–100.
+    pub fn set_volume(&self, volume: u8) -> Result<(), MusicError> {
+        osascript::run(&scripts::set_volume(volume.min(100))).map(|_| ())
+    }
+
+    pub fn toggle_shuffle(&self) -> Result<(), MusicError> {
+        osascript::run(scripts::TOGGLE_SHUFFLE).map(|_| ())
+    }
+
+    pub fn cycle_repeat(&self) -> Result<(), MusicError> {
+        osascript::run(scripts::CYCLE_REPEAT).map(|_| ())
+    }
+
     /// Start Music.app without bringing it to the front or showing its window.
     ///
     /// `open -g` = don't bring to foreground, `-j` = launch hidden,

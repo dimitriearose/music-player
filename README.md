@@ -14,7 +14,8 @@ clutter.
                ▶ playing   vol 60   ⤮ shuffle
 ```
 
-**Status:** milestone 1 of 6 (now playing, play/pause, next/previous).
+**Status:** milestone 2 of 6 (now playing, playback controls, seek, volume,
+shuffle, repeat).
 See [DESIGN.md](DESIGN.md) for the full plan.
 
 ---
@@ -119,12 +120,16 @@ can press `o` to reopen it.
 | Key | Action |
 |---|---|
 | `space` | play / pause |
-| `n` | next track |
-| `p` | previous track |
+| `n` / `p` | next / previous track |
+| `←` `→` or `h` `l` | seek back / forward 5 seconds |
+| `+` / `-` | volume up / down by 5 (`=` works for `+` too, no Shift needed) |
+| `s` | shuffle on / off |
+| `r` | repeat: off → all → one → off |
+| `?` | show / hide this list on screen (`Esc` closes it) |
 | `o` | open Music (when it isn't running) |
 | `q` or `Ctrl-C` | quit `am` (Music keeps playing) |
 
-More keys arrive with each milestone (seek, volume, shuffle, library search…).
+More keys arrive with later milestones (library search, queue, AirPlay…).
 
 ---
 
@@ -160,7 +165,8 @@ src/
 │   └── parse.rs         turns osascript's output into Rust structs (has tests)
 └── ui/
     ├── mod.rs           draws whichever screen applies
-    └── now_playing.rs   the focus screen
+    ├── now_playing.rs   the focus screen
+    └── help.rs          the `?` key list
 ```
 
 Comments marked **"Rust note:"** explain a Rust concept the first time it shows
