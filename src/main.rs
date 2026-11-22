@@ -16,6 +16,7 @@ mod check;
 mod library;
 mod music;
 mod popup;
+mod shuffle;
 mod ui;
 mod worker;
 

@@ -14,8 +14,9 @@
 
 use crate::art::{self, ART_SIZE, Art};
 use crate::library::Library;
-use crate::music::queue::Queued;
+use crate::music::queue::{MAX_QUEUE, Queued};
 use crate::music::{Music, MusicError, PlayerStatus, QueueInfo, Song, Speaker, StatusReply};
+use crate::shuffle;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -65,6 +66,13 @@ pub enum Command {
         next: bool,
         /// The playlist the songs were picked from, if any (see
         /// `Music::enqueue`).
+        source: Option<String>,
+    },
+    /// Shuffle these songs and play them (DESIGN.md §12). If `ids` is
+    /// empty and `source` names a playlist, the worker fetches that
+    /// playlist's songs first (you can shuffle one without opening it).
+    PlayShuffled {
+        ids: Vec<String>,
         source: Option<String>,
     },
     LoadQueue,
@@ -301,7 +309,7 @@ impl Worker {
             }
             Command::PlayPlaylist { id, index } => m.play_playlist(&id, index),
             Command::PlaySongs { ids, start } => {
-                m.play_songs(&ids, start)?;
+                m.play_songs(&ids, start, None)?;
                 self.send_queue();
                 Ok(())
             }
@@ -317,6 +325,27 @@ impl Worker {
                     Queued::Added => format!("Added to queue: {what}"),
                     Queued::Started => format!("Queue started; {what} queued after this song"),
                     Queued::Ready => format!("Queued {what}; start it from the Queue tab"),
+                };
+                self.send(Update::Notice(notice));
+                self.send_queue();
+                Ok(())
+            }
+            Command::PlayShuffled { mut ids, source } => {
+                if ids.is_empty()
+                    && let Some(id) = &source
+                {
+                    ids = m.playlist_songs(id)?.into_iter().map(|s| s.id).collect();
+                }
+                if ids.is_empty() {
+                    self.send(Update::Notice("Nothing to shuffle here".into()));
+                    return Ok(());
+                }
+                shuffle::shuffle(&mut ids, shuffle::seed());
+                m.play_songs(&ids, 1, source.as_deref())?;
+                let notice = if ids.len() > MAX_QUEUE {
+                    format!("Shuffling {MAX_QUEUE} random songs of {}", ids.len())
+                } else {
+                    format!("Shuffling {} songs", ids.len())
                 };
                 self.send(Update::Notice(notice));
                 self.send_queue();

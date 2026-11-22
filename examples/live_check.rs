@@ -15,6 +15,8 @@ mod art;
 mod library;
 #[path = "../src/music/mod.rs"]
 mod music;
+#[path = "../src/shuffle.rs"]
+mod shuffle;
 use music::queue::Queued;
 use music::{Music, PlayState, StatusReply};
 use std::{thread::sleep, time::Duration};
@@ -131,7 +133,7 @@ fn main() {
             .iter()
             .map(|s| s.id.clone())
             .collect();
-        m.play_songs(&a, 2).unwrap();
+        m.play_songs(&a, 2, None).unwrap();
         wait();
         check(
             "play album from track 2",
@@ -140,6 +142,32 @@ fn main() {
         m.next().unwrap();
         wait();
         check("next → album track 3", now_id(&m).as_ref() == Some(&a[2]));
+    }
+
+    // Shuffle an Apple Music playlist (songs mostly not in the library), the
+    // way Shift-S does: our order must be the order Music plays.
+    if let Some(p) = lib.playlists.iter().find(|p| p.apple_music) {
+        let mut ps: Vec<String> = m
+            .playlist_songs(&p.id)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        if ps.len() >= 3 {
+            shuffle::shuffle(&mut ps, shuffle::seed());
+            m.play_songs(&ps, 1, Some(&p.id)).unwrap();
+            wait();
+            check(
+                "shuffled Apple Music playlist starts at our first pick",
+                now_id(&m).as_ref() == Some(&ps[0]),
+            );
+            let q: Vec<String> = m.queue().unwrap().songs.into_iter().map(|s| s.id).collect();
+            let want = ps.len().min(music::queue::MAX_QUEUE);
+            check(
+                &format!("shuffled queue holds {want} songs in our order"),
+                q.len() == want && q[..] == ps[..want],
+            );
+        }
     }
 
     // A saved playlist from song 2, next, then "play next" taking it over.

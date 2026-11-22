@@ -322,3 +322,12 @@ Measured on a 1,583-song library:
    That's why a rebuild renames the old queue instead of emptying it.
 8. **Streamed playlists start slowly.** A fixed 0.3 s pause before skipping
    isn't enough, so scripts wait until `player state is playing`.
+9. **After `play`, the old song keeps playing for about a second** (longer
+   with Bluetooth headphones), so "is it playing?" says yes too early and
+   the skip or seek that follows lands on the old song. Scripts now `stop`
+   first, then wait until Music is playing *from the playlist we asked for*.
+10. **Shuffle is done by `am`, not Music.** Because of finding 3, turning on
+   Music's shuffle mid-playlist often changes nothing you can hear. `S`
+   shuffles the song list itself (`src/shuffle.rs`) and plays it through the
+   queue, so the Queue tab shows the real order. `s` still toggles Music's
+   own shuffle.

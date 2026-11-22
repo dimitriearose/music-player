@@ -91,11 +91,22 @@ impl Music {
     /// Play `ids` in order starting at `start` (1 = first), via the queue.
     /// Used to play an album, an artist, or search results. Songs before
     /// `start` are left out: the queue only holds what's still to come.
-    pub fn play_songs(&self, ids: &[String], start: usize) -> Result<(), MusicError> {
+    ///
+    /// `source` is the playlist the songs came from, if any, so songs that
+    /// aren't in your library (most liked songs) can be copied from it.
+    pub fn play_songs(
+        &self,
+        ids: &[String],
+        start: usize,
+        source: Option<&str>,
+    ) -> Result<(), MusicError> {
         check_ids(ids)?;
+        if let Some(id) = source {
+            check_ids(&[id.to_string()])?;
+        }
         let from = start.saturating_sub(1).min(ids.len());
         let songs = capped(&ids[from..]);
-        osascript::run(&scripts::replace_queue(songs, None, true, None)).map(|_| ())
+        osascript::run(&scripts::replace_queue(songs, source, true, None)).map(|_| ())
     }
 
     /// What's in the queue, and whether we're playing from it.
@@ -114,7 +125,7 @@ impl Music {
     /// before it.
     pub fn play_queue_at(&self, index: usize) -> Result<(), MusicError> {
         let ids: Vec<String> = self.queue()?.songs.into_iter().map(|s| s.id).collect();
-        self.play_songs(&ids, index)
+        self.play_songs(&ids, index, None)
     }
 
     /// Put songs in the queue: right after the current song (`next = true`)

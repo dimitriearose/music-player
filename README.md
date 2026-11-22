@@ -130,7 +130,8 @@ can press `o` to reopen it.
 | `n` / `p` | next / previous track |
 | `←` `→` or `h` `l` | seek back / forward 5 seconds |
 | `+` / `-` | volume up / down by 5 (`=` works for `+` too, no Shift needed) |
-| `s` | shuffle on / off |
+| `S` (Shift-S) | **shuffle your whole library** (200 random songs) |
+| `s` | Music's own shuffle on / off |
 | `r` | repeat: off → all → one → off |
 | `/` | open the library pop-up |
 | `a` | album art on / off |
@@ -148,6 +149,7 @@ Speakers**.
 | `Tab` / `Shift-Tab` | next / previous tab |
 | `↑` `↓` (or `k` `j` outside the search box) | move |
 | `Enter` (or `l` / `→` outside the search box) | play a song, open an album / artist / playlist, or switch a speaker on/off |
+| `Ctrl-S` (or `S`) | **shuffle**: play the playlist / album / artist in random order. Inside one, it shuffles all of it |
 | `Ctrl-N` (or `.`) | **play next**: put the song/album right after the current song |
 | `Ctrl-A` (or `Q`) | **add to queue**: put it at the end |
 | `Esc` (or `h` / `←` / Backspace) | go back, or close the pop-up |

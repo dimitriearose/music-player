@@ -170,6 +170,19 @@ impl App {
             KeyCode::Char('o') if self.connection == Connection::NotRunning => {
                 return Some(Command::LaunchMusic);
             }
+            // Shift-S: shuffle your whole library.
+            KeyCode::Char('S') if self.connection == Connection::Connected => {
+                return match &self.library {
+                    Some(lib) if !lib.songs.is_empty() => Some(Command::PlayShuffled {
+                        ids: lib.songs.iter().map(|s| s.id.clone()).collect(),
+                        source: None,
+                    }),
+                    _ => {
+                        self.notice("Your library is still loading", now);
+                        None
+                    }
+                };
+            }
             _ => {}
         }
 
@@ -322,6 +335,36 @@ impl App {
                 _ => None,
             };
             return Some(Command::Enqueue { ids, next, source });
+        }
+
+        // Shuffle: Shift-S (or ctrl-s while typing). Inside an album, artist
+        // or playlist it shuffles all of it; on a list it shuffles the row.
+        let shuffle_key = match key.code {
+            KeyCode::Char('s') if ctrl => true,
+            KeyCode::Char('S') if !typing => true,
+            _ => false,
+        };
+        if shuffle_key {
+            let view = self.popup.as_ref()?.view.clone();
+            let target = match &view {
+                View::Album(k) => Queueable::Album(k.clone()),
+                View::Artist(name) => Queueable::Artist(name.clone()),
+                View::Playlist { id, .. } => Queueable::Playlist(id.clone()),
+                View::List => row.map(|r| r.queue).unwrap_or(Queueable::Nothing),
+            };
+            let source = match &target {
+                Queueable::Playlist(id) => Some(id.clone()),
+                _ => None,
+            };
+            // A playlist you haven't opened yet has no songs here; the
+            // worker fetches them (empty `ids` + a `source`).
+            let ids = self.resolve_queue(&target);
+            if ids.is_empty() && source.is_none() {
+                self.notice("Nothing to shuffle here", now);
+                return None;
+            }
+            self.popup = None; // back to the quiet screen, like Enter
+            return Some(Command::PlayShuffled { ids, source });
         }
 
         let enter = match key.code {
@@ -791,6 +834,90 @@ mod tests {
                 ids: vec!["A1".into()],
                 next: true,
                 source: Some("P9".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn shift_s_shuffles_the_whole_library() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        assert_eq!(
+            app.handle_key(key('S'), now),
+            Some(Command::PlayShuffled {
+                ids: vec!["A1".into(), "B2".into()],
+                source: None,
+            })
+        );
+    }
+
+    #[test]
+    fn shift_s_inside_a_playlist_shuffles_all_of_it_and_closes() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        app.apply(
+            Update::PlaylistSongs {
+                id: "P9".into(),
+                songs: app.library.as_ref().unwrap().songs.clone(),
+            },
+            now,
+        );
+        app.popup = Some(Popup {
+            tab: Tab::Playlists,
+            view: View::Playlist {
+                id: "P9".into(),
+                name: "Favorite Songs".into(),
+            },
+            selected: 1,
+            ..Popup::new()
+        });
+        assert_eq!(
+            app.handle_key(key('S'), now),
+            Some(Command::PlayShuffled {
+                ids: vec!["A1".into(), "B2".into()],
+                source: Some("P9".into()),
+            })
+        );
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn shuffling_an_unopened_playlist_lets_the_worker_fetch_it() {
+        let now = Instant::now();
+        let mut app = connected_app(now);
+        let playlist = crate::music::Playlist {
+            id: "P9".into(),
+            name: "Mix".into(),
+            apple_music: true,
+        };
+        app.apply(Update::Library(Library::new(vec![], vec![playlist])), now);
+        app.popup = Some(Popup {
+            tab: Tab::Playlists,
+            ..Popup::new()
+        });
+        assert_eq!(
+            app.handle_key(key('S'), now),
+            Some(Command::PlayShuffled {
+                ids: vec![],
+                source: Some("P9".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn capital_s_types_in_the_search_box_but_ctrl_s_shuffles() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        app.handle_key(key('/'), now);
+        type_text(&mut app, "AlphS", now);
+        assert_eq!(app.popup.as_ref().unwrap().query, "AlphS");
+        app.handle_key(KeyEvent::from(KeyCode::Backspace), now);
+        let ctrl_s = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+        assert_eq!(
+            app.handle_key(ctrl_s, now),
+            Some(Command::PlayShuffled {
+                ids: vec!["A1".into()],
+                source: None,
             })
         );
     }

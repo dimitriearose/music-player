@@ -102,8 +102,8 @@ fn hint(p: &popup::Popup) -> &'static str {
         Tab::Speakers => "enter turn on/off · tab next tab · esc close",
         Tab::Queue => "enter jump to song · tab next tab · esc close",
         _ if p.typing() => {
-            "enter play · ctrl-n play next · ctrl-a add to queue · tab next tab · esc close"
+            "enter play · ctrl-s shuffle · ctrl-n play next · ctrl-a add to queue · esc close"
         }
-        _ => "enter open/play · . play next · Q add to queue · h back · esc close",
+        _ => "enter open/play · S shuffle · . play next · Q add to queue · h back · esc close",
     }
 }
