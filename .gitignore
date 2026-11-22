@@ -1,0 +1,30 @@
+# .gitignore: files git should never track or commit.
+# Each line is a pattern. "/x" = only at the repo root; "*.x" = anywhere.
+
+# Build output from cargo (large, and rebuilt from source anyway)
+/target/
+
+# macOS Finder metadata (can reveal folder names from your Mac)
+.DS_Store
+
+# Editor and IDE settings
+.vscode/
+.idea/
+*.swp
+
+# Environment / secret files. This project has no secrets today (it only
+# talks to the local Music.app), but if one is ever added it must never be
+# committed. A documented example file would be allowed.
+.env
+.env.*
+!.env.example
+
+# Logs and temp files: these could contain your song/playlist names
+*.log
+*.tmp
+/logs/
+
+# Anything that looks like a key or certificate
+*.pem
+*.key
+*.p12
