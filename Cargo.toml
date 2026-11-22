@@ -7,4 +7,6 @@ edition = "2024"
 anyhow = "1.0.104"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 ratatui = "0.30.2"
+serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
+toml = { version = "1.2.2", default-features = false, features = ["parse", "serde"] }
