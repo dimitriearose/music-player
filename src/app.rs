@@ -227,6 +227,9 @@ impl App {
             )),
             KeyCode::Char('s') => Some(Command::ToggleShuffle),
             KeyCode::Char('r') => Some(Command::CycleRepeat),
+            KeyCode::Char('L') if self.status.as_ref().is_some_and(|s| s.track.is_some()) => {
+                Some(Command::ToggleFavorite)
+            }
             // 1–9: play that favorite playlist from the top.
             // `c @ '1'..='9'` matches any digit 1–9 and names it `c`.
             KeyCode::Char(c @ '1'..='9') => {
@@ -280,6 +283,11 @@ impl App {
             Command::SetVolume(v) => s.volume = *v,
             Command::ToggleShuffle => s.shuffle = !s.shuffle,
             Command::CycleRepeat => s.repeat = next_repeat(s.repeat),
+            Command::ToggleFavorite => {
+                if let Some(t) = &mut s.track {
+                    t.favorited = !t.favorited;
+                }
+            }
             // Show "shuffled queue" (or stop showing it) straight away.
             Command::PlayShuffled { .. } => s.queue_shuffled = true,
             Command::PlaySongs { .. } | Command::PlayPlaylist { .. } => s.queue_shuffled = false,
@@ -593,6 +601,7 @@ mod tests {
                 artist: "Band".into(),
                 album: "Album".into(),
                 duration,
+                favorited: false,
             }),
             position,
             volume: 50,
@@ -1030,6 +1039,16 @@ mod tests {
             app.handle_key(key('-'), now),
             Some(Command::SetVolume(vol - 10))
         );
+    }
+
+    #[test]
+    fn capital_l_loves_the_song_and_shows_it_at_once() {
+        let now = Instant::now();
+        let mut app = connected_app(now);
+        assert_eq!(app.handle_key(key('L'), now), Some(Command::ToggleFavorite));
+        assert!(app.status.as_ref().unwrap().track.as_ref().unwrap().favorited);
+        app.handle_key(key('L'), now);
+        assert!(!app.status.as_ref().unwrap().track.as_ref().unwrap().favorited);
     }
 
     #[test]

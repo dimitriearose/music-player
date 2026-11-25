@@ -25,7 +25,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
 
     match &status.track {
         Some(track) => {
-            lines.push(Line::styled(track.name.clone(), BOLD));
+            // The title, with a red ♥ if you've favorited it.
+            let mut title = vec![Span::styled(track.name.clone(), BOLD)];
+            if track.favorited {
+                title.push(Span::styled(
+                    " ♥",
+                    Style::new().fg(ratatui::style::Color::Red),
+                ));
+            }
+            lines.push(Line::from(title));
             lines.push(Line::styled(artist_album(&track.artist, &track.album), DIM));
             lines.push(Line::raw(""));
 

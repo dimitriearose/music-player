@@ -48,6 +48,8 @@ pub struct Track {
     pub album: String,
     /// Length in seconds. `f64` is a 64-bit decimal number.
     pub duration: f64,
+    /// ♥'d in Music (the `L` key).
+    pub favorited: bool,
 }
 
 /// One snapshot of the player, fetched by a single `osascript` call.
@@ -204,6 +206,10 @@ impl Music {
     /// 0–100.
     pub fn set_volume(&self, volume: u8) -> Result<(), MusicError> {
         osascript::run(&scripts::set_volume(volume.min(100))).map(|_| ())
+    }
+
+    pub fn toggle_favorite(&self) -> Result<(), MusicError> {
+        osascript::run(scripts::TOGGLE_FAVORITE).map(|_| ())
     }
 
     pub fn toggle_shuffle(&self) -> Result<(), MusicError> {

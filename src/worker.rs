@@ -43,6 +43,8 @@ pub enum Command {
     SetVolume(u8),
     ToggleShuffle,
     CycleRepeat,
+    /// ♥ / un-♥ the current song.
+    ToggleFavorite,
     /// Start Music.app hidden (the `o` key).
     LaunchMusic,
     /// (Re)load the whole library.
@@ -293,6 +295,7 @@ impl Worker {
             Command::SetVolume(v) => m.set_volume(v),
             Command::ToggleShuffle => m.toggle_shuffle(),
             Command::CycleRepeat => m.cycle_repeat(),
+            Command::ToggleFavorite => m.toggle_favorite(),
             Command::LaunchMusic => {
                 self.launch();
                 Ok(())

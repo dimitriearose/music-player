@@ -56,6 +56,8 @@ pub fn parse_status(raw: &str) -> Result<StatusReply, MusicError> {
             artist: f[7].to_string(),
             album: f[8].to_string(),
             duration: parse_number(f[9]).ok_or_else(bad)?,
+            // `get` returns None instead of crashing if the field is missing.
+            favorited: f.get(11) == Some(&"true"),
         };
         (Some(track), parse_number(f[10]).unwrap_or(0.0))
     } else {
@@ -211,6 +213,7 @@ mod tests {
             "Some Album",
             "276.4",
             "102.5",
+            "true",
         ]);
         let StatusReply::Status(s) = parse_status(&raw).unwrap() else {
             panic!("expected a status");
@@ -225,6 +228,7 @@ mod tests {
         assert_eq!(t.name, "Test Song");
         assert_eq!(t.artist, "Some Band");
         assert_eq!(t.duration, 276.4);
+        assert!(t.favorited);
     }
 
     #[test]

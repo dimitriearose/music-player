@@ -34,7 +34,12 @@ tell application "Music"
         set t to current track
         set pos to player position
         if pos is missing value then set pos to 0
-        return base & US & (persistent ID of t) & US & (name of t) & US & (artist of t) & US & (album of t) & US & (duration of t) & US & pos
+        -- ♥ ("favorited"; older versions of Music called it "loved").
+        set fav to false
+        try
+            set fav to favorited of t
+        end try
+        return base & US & (persistent ID of t) & US & (name of t) & US & (artist of t) & US & (album of t) & US & (duration of t) & US & pos & US & fav
     on error
         -- Some streams (e.g. radio) don't expose every field. Report what we have.
         return base
@@ -45,6 +50,10 @@ end tell
 pub const PLAY_PAUSE: &str = r#"tell application "Music" to playpause"#;
 pub const NEXT: &str = r#"tell application "Music" to next track"#;
 pub const PREVIOUS: &str = r#"tell application "Music" to previous track"#;
+
+/// ♥ the current song, or take the ♥ away. In Music a ♥'d song also goes
+/// into your Apple Music "Favorite Songs".
+pub const TOGGLE_FAVORITE: &str = r#"tell application "Music" to set favorited of current track to not (favorited of current track)"#;
 
 pub const TOGGLE_SHUFFLE: &str =
     r#"tell application "Music" to set shuffle enabled to not shuffle enabled"#;
