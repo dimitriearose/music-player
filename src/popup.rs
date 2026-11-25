@@ -85,6 +85,14 @@ pub struct Popup {
     pub selected: usize,
 }
 
+/// Rust note: `Default` is the standard "make an empty one" trait. clippy
+/// asks for it on any public type with a no-argument `new()`.
+impl Default for Popup {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Popup {
     pub fn new() -> Self {
         Popup {

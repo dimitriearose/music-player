@@ -6,22 +6,11 @@
 //! 3. runs the main loop: apply updates → draw → handle a key → repeat,
 //! 4. puts the terminal back to normal on the way out.
 //!
-//! Rust note: each `mod x;` line pulls in the file `src/x.rs` (or
-//! `src/x/mod.rs`) as a module. Rust only compiles files that are declared
-//! this way.
+//! The code itself lives in the library (`src/lib.rs`), so other programs
+//! can embed am too. This file only adds the command line and the main loop.
 
-mod app;
-mod art;
-mod check;
-mod config;
-mod library;
-mod music;
-mod popup;
-mod shuffle;
-mod ui;
-mod worker;
-
-use app::App;
+use am::app::App;
+use am::{art, check, config, music, ui, worker};
 use ratatui::{
     DefaultTerminal,
     crossterm::event::{self, Event, KeyEventKind},

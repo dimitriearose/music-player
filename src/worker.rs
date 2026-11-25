@@ -92,6 +92,12 @@ pub enum Command {
         name: String,
         on: bool,
     },
+    /// Stop (`false`) or restart (`true`) the once-a-second status poll.
+    /// For programs that embed am (like homebase): while am's screen is
+    /// hidden, nobody needs the status, so the worker sleeps until the next
+    /// command and runs no `osascript` at all. Restarting polls straight away.
+    /// The `am` program itself never sends this.
+    SetPolling(bool),
 }
 
 /// News from the worker to the UI.
@@ -156,6 +162,8 @@ struct Worker {
     library_loaded: bool,
     /// The song we last fetched artwork for, so we only fetch on a change.
     art_track: Option<String>,
+    /// Should we ask Music for its status every second? (`Command::SetPolling`)
+    polling: bool,
 }
 
 impl Worker {
@@ -168,6 +176,7 @@ impl Worker {
             acked: 0,
             library_loaded: false,
             art_track: None,
+            polling: true,
         }
     }
 
@@ -180,16 +189,24 @@ impl Worker {
     fn run(mut self, commands: Receiver<Command>) {
         loop {
             // 1. Ask Music what's going on and tell the UI.
-            if !self.poll() {
+            if self.polling && !self.poll() {
                 return; // UI gone: the app is quitting
             }
 
             // 2. Wait up to POLL_INTERVAL for a command. If none arrives,
-            //    loop round and poll again.
-            let first = match commands.recv_timeout(POLL_INTERVAL) {
-                Ok(cmd) => cmd,
-                Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => return,
+            //    loop round and poll again. With polling off, wait as long
+            //    as it takes: the thread sleeps and costs nothing.
+            let first = if self.polling {
+                match commands.recv_timeout(POLL_INTERVAL) {
+                    Ok(cmd) => cmd,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            } else {
+                match commands.recv() {
+                    Ok(cmd) => cmd,
+                    Err(_) => return, // UI gone
+                }
             };
 
             // 3. Run that command, then any others that piled up meanwhile
@@ -198,17 +215,27 @@ impl Worker {
             //
             //    `std::iter::once(first).chain(commands.try_iter())` means "the
             //    first command, followed by every command already waiting".
+            let mut changed_music = false;
             for cmd in std::iter::once(first).chain(commands.try_iter()) {
+                // Turning polling on/off is about the worker, not Music, so
+                // it isn't counted in `acked` (see `App::apply`).
+                if let Command::SetPolling(on) = cmd {
+                    self.polling = on;
+                    continue;
+                }
                 if let Err(e) = self.execute(cmd) {
                     self.send(Update::Error(e));
                 }
                 self.acked += 1;
+                changed_music = true;
             }
 
             // 4. Give Music a moment before the next poll. Found by testing:
             //    right after a change (shuffle, repeat, next…) Music still
             //    reports the *old* value for a fraction of a second.
-            thread::sleep(SETTLE);
+            if changed_music {
+                thread::sleep(SETTLE);
+            }
         }
     }
 
@@ -397,6 +424,8 @@ impl Worker {
                 self.send(Update::Speakers(speakers));
                 Ok(())
             }
+            // Handled in `run` before we get here.
+            Command::SetPolling(_) => Ok(()),
         }
     }
 
