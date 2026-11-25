@@ -1,6 +1,6 @@
 //! The focus screen: title, artist/album, progress bar, play state.
 
-use super::{BOLD, DIM, centered};
+use super::{BOLD, DIM, SHUFFLE, centered};
 use crate::app::{App, format_time};
 use crate::art::{Art, color};
 use crate::music::{PlayState, Repeat};
@@ -131,11 +131,11 @@ fn compact_line(app: &App, now: Instant) -> Line<'static> {
         format_time(app.position(now)),
         format_time(track.duration)
     )];
-    if status.shuffle || status.queue_shuffled {
-        extras.push("⤮".into());
-    }
     extras.extend(app.sleep_label(now));
     spans.push(Span::styled(format!("   {}", extras.join("   ")), DIM));
+    if status.shuffle || status.queue_shuffled {
+        spans.push(Span::styled("   ⤮", SHUFFLE));
+    }
     Line::from(spans)
 }
 
@@ -202,20 +202,31 @@ fn state_line(
         PlayState::Paused => "⏸ paused",
         PlayState::Stopped => "■ stopped",
     };
-    let mut parts = vec![state.to_string(), format!("vol {volume}")];
+    // (span text, is it a shuffle label?) — shuffle ones get the colour.
+    let mut parts: Vec<(String, bool)> =
+        vec![(state.to_string(), false), (format!("vol {volume}"), false)];
     if queue_shuffled {
-        parts.push("⤮ shuffled queue".into());
+        parts.push(("⤮ shuffled queue".into(), true));
     }
     if shuffle {
-        parts.push("⤮ shuffle".into());
+        parts.push(("⤮ shuffle on".into(), true));
     }
     match repeat {
         Repeat::Off => {}
-        Repeat::One => parts.push("↻ one".into()),
-        Repeat::All => parts.push("↻ all".into()),
+        Repeat::One => parts.push(("↻ one".into(), false)),
+        Repeat::All => parts.push(("↻ all".into(), false)),
     }
-    parts.extend(sleep); // adds the sleep label if there is one
-    Line::styled(parts.join("   "), DIM)
+    if let Some(s) = sleep {
+        parts.push((s, false));
+    }
+    let mut spans = Vec::new();
+    for (i, (text, is_shuffle)) in parts.into_iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("   ", DIM));
+        }
+        spans.push(Span::styled(text, if is_shuffle { SHUFFLE } else { DIM }));
+    }
+    Line::from(spans)
 }
 
 #[cfg(test)]
@@ -246,6 +257,11 @@ mod tests {
 
     /// Draw the whole screen into a fake terminal and return its text.
     fn render(width: u16, height: u16) -> String {
+        render_with(width, height, |_| {})
+    }
+
+    /// `render`, after changing the app with `setup` (e.g. opening the pop-up).
+    fn render_with(width: u16, height: u16, setup: impl Fn(&mut App)) -> String {
         use crate::music::{PlayerStatus, Track};
         use crate::worker::Update;
         let now = Instant::now();
@@ -272,6 +288,7 @@ mod tests {
             },
             now,
         );
+        setup(&mut app);
         let backend = ratatui::backend::TestBackend::new(width, height);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
@@ -296,6 +313,16 @@ mod tests {
             screen.contains("▶ Test Song · Band ♥   1:11 / 3:20   ⤮"),
             "{screen}"
         );
+    }
+
+    #[test]
+    fn shuffle_badge_shows_in_the_pop_up() {
+        let screen = render_with(100, 30, |app| app.popup = Some(crate::popup::Popup::new()));
+        let tab_row = screen
+            .lines()
+            .find(|l| l.contains("Playlists"))
+            .expect("tab row");
+        assert!(tab_row.contains("⤮ shuffled queue"), "{tab_row}");
     }
 
     #[test]
@@ -327,7 +354,7 @@ mod tests {
             Some("☾ 5m".into()),
         )
         .to_string();
-        assert_eq!(busy, "▶ playing   vol 60   ⤮ shuffle   ↻ all   ☾ 5m");
+        assert_eq!(busy, "▶ playing   vol 60   ⤮ shuffle on   ↻ all   ☾ 5m");
         let ours = state_line(PlayState::Playing, 60, false, true, Repeat::Off, None).to_string();
         assert_eq!(ours, "▶ playing   vol 60   ⤮ shuffled queue");
     }

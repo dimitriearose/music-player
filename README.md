@@ -11,7 +11,7 @@ clutter.
 
         1:42 ━━━━━━━━━━━━━━━━──────────────── 4:36
 
-               ▶ playing   vol 60   ⤮ shuffle   ☾ 25m
+               ▶ playing   vol 60   ⤮ shuffle on   ☾ 25m
                  next  Another Song · Some Band
 ```
 
@@ -158,8 +158,8 @@ can press `o` to reopen it.
 | `n` / `p` | next / previous track |
 | `←` `→` or `h` `l` | seek back / forward 5 seconds (changeable in Settings) |
 | `+` / `-` | volume up / down by 5, changeable in Settings (`=` works for `+` too, no Shift needed) |
-| `S` (Shift-S) | **shuffle your whole library** (200 random songs). The status line shows `⤮ shuffled queue` |
-| `s` | Music's own shuffle on / off. The status line shows `⤮ shuffle` |
+| `S` (Shift-S) | **shuffle your whole library** (200 random songs). The status line shows `⤮ shuffled queue` in colour |
+| `s` | Music's own shuffle on / off. The status line shows `⤮ shuffle on` in colour |
 | `r` | repeat: off → all → one → off |
 | `L` (Shift-L) | ♥ love the song (adds it to your Apple Music "Favorite Songs"), again to unlove |
 | `P` (Shift-P) | add the song to one of your playlists (a list opens; `Enter` picks, `Esc` cancels) |
@@ -182,10 +182,14 @@ Speakers**.
 | `↑` `↓` (or `k` `j` outside the search box) | move |
 | `Enter` (or `l` / `→` outside the search box) | play a song, open an album / artist / playlist, or switch a speaker on/off |
 | `Ctrl-S` (or `S`) | **shuffle**: play the playlist / album / artist in random order. Inside one, it shuffles all of it |
+| `s` (outside the search box) | Music's shuffle on / off without closing the pop-up |
 | `Ctrl-N` (or `.`) | **play next**: put the song/album right after the current song |
 | `Ctrl-A` (or `Q`) | **add to queue**: put it at the end |
 | `Esc` (or `h` / `←` / Backspace) | go back, or close the pop-up |
 | `Ctrl-R` | reload your library (after adding music in Music.app) |
+
+When shuffle is on, a coloured **⤮ shuffle on** (or **⤮ shuffled queue**)
+badge sits at the right of the tab bar, so you can see it while browsing.
 
 The Playlists tab lists everything in Music's sidebar. Your own playlists
 come first. Apple Music playlists you've added come after, marked

@@ -23,6 +23,21 @@ use std::time::Instant;
 /// (including Terminal.app) supports.
 pub const DIM: Style = Style::new().fg(Color::DarkGray);
 pub const BOLD: Style = Style::new().add_modifier(Modifier::BOLD);
+/// Shuffle is the one setting that changes what you hear next without you
+/// seeing it, so when it's on it gets a colour, not the quiet grey.
+pub const SHUFFLE: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+
+/// The shuffle badge, if either kind of shuffle is on: "⤮ shuffled queue"
+/// (am shuffled the songs, `S`) or "⤮ shuffle on" (Music's own, `s`).
+pub fn shuffle_label(status: &crate::music::PlayerStatus) -> Option<&'static str> {
+    if status.queue_shuffled {
+        Some("⤮ shuffled queue")
+    } else if status.shuffle {
+        Some("⤮ shuffle on")
+    } else {
+        None
+    }
+}
 
 /// Draw one frame.
 pub fn draw(frame: &mut Frame, app: &App, now: Instant) {

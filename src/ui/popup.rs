@@ -1,7 +1,7 @@
 //! Draws the library pop-up: tabs along the top, the search box or a
 //! heading, the rows, and a one-line hint at the bottom.
 
-use super::{BOLD, DIM};
+use super::{BOLD, DIM, SHUFFLE, shuffle_label};
 use crate::app::App;
 use crate::popup::{self, Tab};
 use ratatui::{
@@ -46,6 +46,16 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         tabs.push(Span::raw("   "));
     }
     frame.render_widget(Paragraph::new(Line::from(tabs)), tabs_area);
+
+    // Shuffle badge on the right of the tab bar, so you can see it while
+    // browsing (the main screen's status line is hidden behind the pop-up).
+    if let Some(label) = app.status.as_ref().and_then(shuffle_label) {
+        frame.render_widget(
+            Paragraph::new(Line::styled(label, SHUFFLE))
+                .alignment(ratatui::layout::Alignment::Right),
+            tabs_area,
+        );
+    }
 
     // Search box, or the name of what you opened.
     let header = if p.typing() {
@@ -104,6 +114,6 @@ fn hint(p: &popup::Popup) -> &'static str {
         _ if p.typing() => {
             "enter play · ctrl-s shuffle · ctrl-n play next · ctrl-a add to queue · esc close"
         }
-        _ => "enter open/play · S shuffle · . play next · Q add to queue · h back · esc close",
+        _ => "enter open/play · S shuffle it · s shuffle on/off · . next · Q queue · esc close",
     }
 }

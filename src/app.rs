@@ -184,6 +184,11 @@ impl App {
         let cmd = self.command_for(key, now)?; // `?` on an Option: return None if None
         self.predict(&cmd, now);
         self.sent += 1;
+        // Say so when shuffle changes: it changes what you'll hear next.
+        if cmd == Command::ToggleShuffle {
+            let on = self.status.as_ref().is_some_and(|s| s.shuffle);
+            self.notice(if on { "Shuffle on" } else { "Shuffle off" }, now);
+        }
         Some(cmd)
     }
 
@@ -629,6 +634,11 @@ impl App {
                 }
             }
             KeyCode::Char('q') => self.popup = None,
+            // Music's own shuffle, also from inside the pop-up (the badge in
+            // the tab bar shows it). Not while typing: there `s` is a letter.
+            KeyCode::Char('s') if self.connection == Connection::Connected => {
+                return Some(Command::ToggleShuffle);
+            }
             _ => {}
         }
         None
@@ -1394,6 +1404,25 @@ mod tests {
         // Switched off in settings.
         app.show_next = false;
         assert_eq!(app.next_up(), None);
+    }
+
+    #[test]
+    fn s_toggles_shuffle_with_a_message_even_in_the_pop_up() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        assert_eq!(app.handle_key(key('s'), now), Some(Command::ToggleShuffle));
+        assert_eq!(app.message(now), Some("Shuffle on"));
+
+        app.handle_key(key('/'), now);
+        app.handle_key(KeyEvent::from(KeyCode::Tab), now); // Playlists: browsing
+        assert_eq!(app.handle_key(key('s'), now), Some(Command::ToggleShuffle));
+        assert_eq!(app.message(now), Some("Shuffle off"));
+        assert!(app.popup.is_some(), "the pop-up stays open");
+
+        // In the search box, `s` is just a letter.
+        app.handle_key(KeyEvent::from(KeyCode::BackTab), now);
+        assert_eq!(app.handle_key(key('s'), now), None);
+        assert_eq!(app.popup.as_ref().unwrap().query, "s");
     }
 
     #[test]
