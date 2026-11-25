@@ -38,6 +38,38 @@ pub fn decode(bytes: &[u8], size: u32) -> Option<Art> {
     Some(Art { size, pixels })
 }
 
+/// The cover's main colour, made bright enough to read on a dark
+/// background: used to tint the progress bar. `None` for a grey cover.
+///
+/// How: every pixel votes for its colour, but vivid pixels count far more
+/// than dull ones (weight = saturation²), so a small splash of red on a
+/// grey cover still wins over the grey. Then we scale the result up until
+/// its brightest channel is at least 200 (of 255).
+pub fn accent(art: &Art) -> Option<[u8; 3]> {
+    let (mut sum, mut total) = ([0.0f64; 3], 0.0f64);
+    for p in &art.pixels {
+        let max = *p.iter().max().unwrap() as f64;
+        let min = *p.iter().min().unwrap() as f64;
+        if max < 30.0 {
+            continue; // near-black: no real colour to speak of
+        }
+        let saturation = (max - min) / max;
+        let weight = saturation * saturation;
+        for c in 0..3 {
+            sum[c] += p[c] as f64 * weight;
+        }
+        total += weight;
+    }
+    // Not enough colour anywhere (black-and-white or grey cover).
+    if total < art.pixels.len() as f64 * 0.02 {
+        return None;
+    }
+    let avg = sum.map(|v| v / total);
+    let brightest = avg.iter().cloned().fold(1.0, f64::max);
+    let scale = (200.0 / brightest).max(1.0);
+    Some(avg.map(|v| (v * scale).min(255.0) as u8))
+}
+
 /// Does this terminal understand full 24-bit colour? Terminals that do
 /// usually say so in the `COLORTERM` environment variable.
 pub fn truecolor_supported() -> bool {
@@ -98,6 +130,27 @@ fn distance(a: [u8; 3], b: [u8; 3]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn art_of(pixels: Vec<[u8; 3]>) -> Art {
+        let size = (pixels.len() as f64).sqrt() as u32;
+        Art { size, pixels }
+    }
+
+    #[test]
+    fn accent_finds_the_vivid_colour_and_brightens_it() {
+        // Mostly grey, with a quarter dark red.
+        let mut pixels = vec![[120, 120, 120]; 12];
+        pixels.extend(vec![[100, 10, 10]; 4]);
+        let [r, g, b] = accent(&art_of(pixels)).unwrap();
+        assert!(r >= 200, "brightened: {r}");
+        assert!(g < 60 && b < 60, "still red: {g} {b}");
+    }
+
+    #[test]
+    fn grey_or_black_covers_have_no_accent() {
+        assert_eq!(accent(&art_of(vec![[90, 90, 90]; 16])), None);
+        assert_eq!(accent(&art_of(vec![[5, 0, 10]; 16])), None);
+    }
 
     #[test]
     fn pure_colours_map_to_the_cube_corners() {

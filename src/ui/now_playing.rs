@@ -47,10 +47,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
             let width = room.min(MAX_BAR_WIDTH);
             let (filled, empty) = bar_parts(pos, track.duration, width);
 
+            // The filled part takes the cover's colour, if there is one.
+            let bar_style = match app.bar_color() {
+                Some(rgb) => Style::new().fg(color(rgb, app.truecolor)),
+                None => Style::new(),
+            };
             lines.push(Line::from(vec![
                 Span::styled(left, DIM),
                 Span::raw(" "),
-                Span::raw("━".repeat(filled)),
+                Span::styled("━".repeat(filled), bar_style),
                 Span::styled("─".repeat(empty), DIM),
                 Span::raw(" "),
                 Span::styled(right, DIM),
@@ -72,6 +77,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         lines.push(Line::styled(format!("next  {}", artist_title(next)), DIM));
     }
 
+    // Too short a window for all that? One line instead (compact mode),
+    // e.g. when am lives in a thin strip at the bottom of the screen.
+    if (area.height as usize) < lines.len() {
+        centered(frame, area, vec![compact_line(app, now)]);
+        return;
+    }
+
     // Album art goes on top, but only if the window is tall enough for it
     // *and* the text; otherwise the text wins and the art is skipped.
     if let Some(art) = app.current_art() {
@@ -85,6 +97,46 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
     }
 
     centered(frame, area, lines);
+}
+
+/// Everything important on one line:
+/// "▶ Let It Happen · Tame Impala ♥   1:11 / 7:46   ⤮ ☾ 12m".
+fn compact_line(app: &App, now: Instant) -> Line<'static> {
+    let Some(status) = &app.status else {
+        return Line::raw("");
+    };
+    let icon = match status.state {
+        PlayState::Playing => "▶",
+        PlayState::Paused => "⏸",
+        PlayState::Stopped => "■",
+    };
+    let Some(track) = &status.track else {
+        return Line::styled(format!("{icon} nothing playing"), DIM);
+    };
+    let mut spans = vec![
+        Span::raw(format!("{icon} ")),
+        Span::styled(track.name.clone(), BOLD),
+    ];
+    if !track.artist.is_empty() {
+        spans.push(Span::styled(format!(" · {}", track.artist), DIM));
+    }
+    if track.favorited {
+        spans.push(Span::styled(
+            " ♥",
+            Style::new().fg(ratatui::style::Color::Red),
+        ));
+    }
+    let mut extras = vec![format!(
+        "{} / {}",
+        format_time(app.position(now)),
+        format_time(track.duration)
+    )];
+    if status.shuffle || status.queue_shuffled {
+        extras.push("⤮".into());
+    }
+    extras.extend(app.sleep_label(now));
+    spans.push(Span::styled(format!("   {}", extras.join("   ")), DIM));
+    Line::from(spans)
 }
 
 /// Turn the artwork into lines of `▀` characters: each character's
@@ -190,6 +242,65 @@ mod tests {
         assert_eq!(bar_parts(500.0, 100.0, 10), (10, 0), "clamped");
         assert_eq!(bar_parts(5.0, 0.0, 10), (0, 10), "unknown length");
         assert_eq!(bar_parts(5.0, 10.0, 0), (0, 0), "tiny window");
+    }
+
+    /// Draw the whole screen into a fake terminal and return its text.
+    fn render(width: u16, height: u16) -> String {
+        use crate::music::{PlayerStatus, Track};
+        use crate::worker::Update;
+        let now = Instant::now();
+        let mut app = App::new(now);
+        app.apply(
+            Update::Status {
+                status: PlayerStatus {
+                    state: PlayState::Playing,
+                    track: Some(Track {
+                        id: "X".into(),
+                        name: "Test Song".into(),
+                        artist: "Band".into(),
+                        album: "Album".into(),
+                        duration: 200.0,
+                        favorited: true,
+                    }),
+                    position: 71.0,
+                    volume: 50,
+                    shuffle: false,
+                    repeat: Repeat::Off,
+                    queue_shuffled: true,
+                },
+                acked: 0,
+            },
+            now,
+        );
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &app, now))
+            .unwrap();
+        // Join the screen's cells into lines of text.
+        let buffer = terminal.backend().buffer().clone();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn short_window_gets_the_one_line_compact_view() {
+        let screen = render(80, 4);
+        assert!(screen.contains("▶ Test Song · Band ♥   1:11 / 3:20   ⤮"), "{screen}");
+    }
+
+    #[test]
+    fn tall_window_gets_the_full_view() {
+        let screen = render(80, 20);
+        assert!(screen.contains("Band — Album"), "{screen}");
+        assert!(screen.contains("⤮ shuffled queue"), "{screen}");
+        assert!(!screen.contains("Test Song · Band"), "{screen}");
     }
 
     #[test]

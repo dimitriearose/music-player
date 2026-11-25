@@ -121,6 +121,19 @@ impl App {
         if !self.show_art {
             return None;
         }
+        self.art_for_current_song()
+    }
+
+    /// The progress bar's colour, from the cover (if `art_color` is on).
+    /// Works even with the art hidden (`a`).
+    pub fn bar_color(&self) -> Option<[u8; 3]> {
+        if !self.art_color {
+            return None;
+        }
+        crate::art::accent(self.art_for_current_song()?)
+    }
+
+    fn art_for_current_song(&self) -> Option<&Art> {
         let playing = self.status.as_ref()?.track.as_ref()?;
         match &self.art {
             Some((id, art)) if *id == playing.id => Some(art),
