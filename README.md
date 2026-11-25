@@ -25,7 +25,32 @@ See [DESIGN.md](DESIGN.md) for how it's built.
 
 ---
 
-## Setup
+## Install (the quick way)
+
+With [Homebrew](https://brew.sh):
+
+```bash
+brew install dimitriearose/tap/am
+```
+
+That downloads a ready-built `am` (for Apple Silicon and Intel Macs), so you
+don't need Rust. Later, `brew upgrade am` gets new versions. Then do step 4
+below (the Automation permission) and run `am`.
+
+Without Homebrew: download `am-…-macos-universal.tar.gz` from the
+[releases page](https://github.com/dimitriearose/music-player/releases),
+unpack it, and move `am` somewhere on your `PATH` (e.g. `~/.local/bin`).
+macOS blocks programs downloaded in a browser until you clear the
+"quarantine" flag it adds:
+
+```bash
+xattr -d com.apple.quarantine am
+```
+
+The rest of this section is for building `am` from the source code
+yourself, which is what you want if you're changing it.
+
+## Setup (building from source)
 
 You only need to do this once.
 

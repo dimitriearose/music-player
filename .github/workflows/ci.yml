@@ -1,0 +1,29 @@
+# Runs on every push and pull request: formatting, lint, and unit tests.
+# (The live checks in examples/ need Music.app and your library, so they
+# can't run on GitHub's machines; run them yourself with
+# `cargo run --example live_check`.)
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The token GitHub gives this job can only read the code.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Lint (warnings count as errors)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test

@@ -1,7 +1,10 @@
 [package]
 name = "am"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+description = "A quiet, keyboard-driven terminal player for Apple Music on macOS"
+license = "MIT"
+repository = "https://github.com/dimitriearose/music-player"
 
 [dependencies]
 anyhow = "1.0.104"

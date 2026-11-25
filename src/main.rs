@@ -48,6 +48,24 @@ fn main() -> anyhow::Result<()> {
             return Ok(());
         }
         Some("--init-config") => return config::init(),
+        // `env!` reads the version from Cargo.toml when compiling.
+        Some("--version" | "-V") => {
+            println!("am {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Some("--help" | "-h") => {
+            println!(
+                "am {}: a quiet, keyboard-driven player for Apple Music",
+                env!("CARGO_PKG_VERSION")
+            );
+            println!();
+            println!("  am                 start (press ? inside for keys)");
+            println!("  am --check         test the connection to Music, read-only");
+            println!("  am --config        show settings and where they come from");
+            println!("  am --init-config   create ~/.config/am/config.toml");
+            println!("  am --version       print the version");
+            return Ok(());
+        }
         _ => {}
     }
 
