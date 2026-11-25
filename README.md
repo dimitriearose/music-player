@@ -408,6 +408,28 @@ up.
 
 ---
 
+## Releasing a new version
+
+1. Bump `version` in `Cargo.toml` (e.g. `0.2.0` → `0.3.0`) and commit.
+2. Tag that commit and push the tag. A tag is a named bookmark on a commit:
+
+   ```bash
+   git tag v0.3.0
+   ```
+
+   ```bash
+   git push origin v0.3.0
+   ```
+
+3. GitHub builds the release (see the Actions tab); the release page gets
+   `am-v0.3.0-macos-universal.tar.gz` and a `.sha256` file.
+4. In [homebrew-tap](https://github.com/dimitriearose/homebrew-tap), edit
+   `Formula/am.rb`: put the new version in `url` and the new `sha256`.
+   Commit and push. Everyone's `brew upgrade am` then gets it.
+
+Every push to `main` also runs the checks (formatting, lint, unit tests) on
+GitHub; a red ✗ next to a commit means one failed.
+
 ## Git basics used in this project
 
 | Command | What it does |
