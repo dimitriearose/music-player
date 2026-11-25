@@ -322,6 +322,9 @@ fn main() {
         first && !second && count == "1",
     );
 
+    let out = music::mac_output();
+    check(&format!("Mac sound output found ({out:?})"), out.is_some());
+
     let path = std::env::temp_dir().join("am-live-art");
     let saved = m.save_artwork(&path.to_string_lossy()).unwrap();
     let decoded = saved && art::decode(&std::fs::read(&path).unwrap(), 20).is_some();

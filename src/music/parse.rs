@@ -138,6 +138,24 @@ pub fn parse_playlists(raw: &str) -> Result<Vec<Playlist>, MusicError> {
         .collect())
 }
 
+/// Find the default output device in `system_profiler SPAudioDataType`
+/// output. Devices are listed as an indented "Name:" line followed by
+/// their details; the one we want has "Default Output Device: Yes".
+pub fn parse_default_output(report: &str) -> Option<String> {
+    let mut current: Option<&str> = None;
+    for line in report.lines() {
+        let trimmed = line.trim();
+        // A device heading: 8 spaces of indent, ends with ':', no value.
+        if line.starts_with("        ") && !line.starts_with("         ") && trimmed.ends_with(':')
+        {
+            current = Some(trimmed.trim_end_matches(':'));
+        } else if trimmed == "Default Output Device: Yes" {
+            return current.map(str::to_string);
+        }
+    }
+    None
+}
+
 /// Parse `scripts::SPEAKERS`: one record per device.
 pub fn parse_speakers(raw: &str) -> Result<Vec<Speaker>, MusicError> {
     if raw.is_empty() {
@@ -363,6 +381,16 @@ mod tests {
             vec![]
         );
         assert!(parse_playlists(&columns(&[&["P1"], &["only two columns"]])).is_err());
+    }
+
+    #[test]
+    fn finds_the_default_output_device() {
+        let report = "Audio:\n\n    Devices:\n\n        Test Headphones:\n\n          Default Input Device: Yes\n          Input Channels: 1\n\n        Test Headphones:\n\n          Default Output Device: Yes\n          Output Channels: 2\n\n        Built-in Speakers:\n\n          Output Channels: 2\n";
+        assert_eq!(
+            parse_default_output(report).as_deref(),
+            Some("Test Headphones")
+        );
+        assert_eq!(parse_default_output("Audio:\n"), None);
     }
 
     #[test]

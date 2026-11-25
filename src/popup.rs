@@ -190,6 +190,8 @@ pub struct Data<'a> {
     pub playlist_songs: &'a HashMap<String, Vec<Song>>,
     pub queue: Option<&'a QueueInfo>,
     pub speakers: Option<&'a [Speaker]>,
+    /// The Mac's current sound output (e.g. "AirPods Pro"), once known.
+    pub mac_output: Option<&'a str>,
 }
 
 const ICON_SONG: &str = "♪";
@@ -203,7 +205,7 @@ pub fn rows(popup: &Popup, data: &Data) -> Vec<Row> {
     // Queue and Speakers don't need the library.
     match popup.tab {
         Tab::Queue => return queue_rows(data.queue),
-        Tab::Speakers => return speaker_rows(data.speakers),
+        Tab::Speakers => return speaker_rows(data.speakers, data.mac_output),
         _ => {}
     }
     let Some(lib) = data.library else {
@@ -434,7 +436,10 @@ fn queue_rows(queue: Option<&QueueInfo>) -> Vec<Row> {
         .collect()
 }
 
-fn speaker_rows(speakers: Option<&[Speaker]>) -> Vec<Row> {
+/// `mac_output`: where "Computer" actually plays. Music's own Mac entry
+/// means "this Mac's current sound output", which may be AirPods, not the
+/// speakers, so we say which.
+fn speaker_rows(speakers: Option<&[Speaker]>, mac_output: Option<&str>) -> Vec<Row> {
     let Some(speakers) = speakers else {
         return vec![Row::message("Looking for speakers…")];
     };
@@ -446,10 +451,10 @@ fn speaker_rows(speakers: Option<&[Speaker]>) -> Vec<Row> {
         .map(|s| Row {
             icon: if s.selected { "●" } else { "○" },
             label: s.name.clone(),
-            detail: if s.available {
-                s.kind.clone()
-            } else {
-                format!("{} · unavailable", s.kind)
+            detail: match (s.available, s.kind.as_str(), mac_output) {
+                (false, _, _) => format!("{} · unavailable", s.kind),
+                (true, "computer", Some(out)) => format!("this Mac · plays through {out}"),
+                (true, _, _) => s.kind.clone(),
             },
             action: Action::ToggleSpeaker {
                 name: s.name.clone(),
@@ -505,6 +510,7 @@ mod tests {
             playlist_songs: cache,
             queue,
             speakers,
+            mac_output: Some("Test Headphones"),
         }
     }
 
@@ -630,5 +636,24 @@ mod tests {
             }
         );
         assert_eq!(rows[0].detail, "HomePod · unavailable");
+    }
+
+    #[test]
+    fn the_mac_row_says_where_its_sound_goes() {
+        let cache = HashMap::new();
+        let speakers = vec![Speaker {
+            name: "Test MacBook".into(),
+            kind: "computer".into(),
+            selected: true,
+            available: true,
+        }];
+        let rows = rows(
+            &Popup {
+                tab: Tab::Speakers,
+                ..Popup::new()
+            },
+            &data(None, &cache, None, Some(&speakers)),
+        );
+        assert_eq!(rows[0].detail, "this Mac · plays through Test Headphones");
     }
 }

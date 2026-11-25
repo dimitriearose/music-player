@@ -84,6 +84,8 @@ pub struct App {
     /// Settings: show the next song / colour the bar from the art.
     pub show_next: bool,
     pub art_color: bool,
+    /// Where the Mac sends its sound (e.g. AirPods), for the Speakers tab.
+    pub mac_output: Option<String>,
 }
 
 impl App {
@@ -113,6 +115,7 @@ impl App {
             sleep: None,
             show_next: true,
             art_color: true,
+            mac_output: None,
         }
     }
 
@@ -148,10 +151,10 @@ impl App {
             playlist_songs: &self.playlist_songs,
             queue: self.queue.as_ref(),
             speakers: self.speakers.as_deref(),
+            mac_output: self.mac_output.as_deref(),
         }
     }
 
-    /// Put a short notice on the bottom line.
     /// Take on your settings (see `config.rs`), and show the first problem
     /// with them, if any, on the bottom line.
     pub fn use_config(&mut self, loaded: &crate::config::Loaded, now: Instant) {
@@ -167,6 +170,7 @@ impl App {
         }
     }
 
+    /// Put a short notice on the bottom line.
     fn notice(&mut self, text: &str, now: Instant) {
         self.message = Some((text.to_string(), now));
     }
@@ -478,6 +482,7 @@ impl App {
             }
             Update::Queue(q) => self.queue = Some(q),
             Update::Speakers(s) => self.speakers = Some(s),
+            Update::MacOutput(name) => self.mac_output = name,
             Update::Art { track_id, art } => {
                 // `map` only runs if there *is* art: Some(art) → Some((id, art)).
                 self.art = art.map(|a| (track_id, a));

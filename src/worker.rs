@@ -120,6 +120,8 @@ pub enum Update {
     },
     Queue(QueueInfo),
     Speakers(Vec<Speaker>),
+    /// The Mac's current sound output device, if found.
+    MacOutput(Option<String>),
     /// Artwork for a song (`None` if it has none).
     Art {
         track_id: String,
@@ -385,6 +387,8 @@ impl Worker {
             Command::LoadSpeakers => {
                 let speakers = m.speakers()?;
                 self.send(Update::Speakers(speakers));
+                // Slower (~1.5 s), so it follows once the list is showing.
+                self.send(Update::MacOutput(crate::music::mac_output()));
                 Ok(())
             }
             Command::SetSpeaker { name, on } => {

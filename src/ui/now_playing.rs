@@ -292,7 +292,10 @@ mod tests {
     #[test]
     fn short_window_gets_the_one_line_compact_view() {
         let screen = render(80, 4);
-        assert!(screen.contains("▶ Test Song · Band ♥   1:11 / 3:20   ⤮"), "{screen}");
+        assert!(
+            screen.contains("▶ Test Song · Band ♥   1:11 / 3:20   ⤮"),
+            "{screen}"
+        );
     }
 
     #[test]

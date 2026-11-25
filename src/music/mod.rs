@@ -244,3 +244,15 @@ impl Music {
         }
     }
 }
+
+/// The name of the device your Mac currently plays sound through (e.g.
+/// "Dimitri's AirPods Pro" or "MacBook Pro Speakers"), from macOS's own
+/// system report. `None` if it can't be found. Read-only: changing it
+/// isn't possible from a script without extra tools.
+pub fn mac_output() -> Option<String> {
+    let out = std::process::Command::new("/usr/sbin/system_profiler")
+        .arg("SPAudioDataType")
+        .output()
+        .ok()?;
+    parse::parse_default_output(&String::from_utf8_lossy(&out.stdout))
+}
