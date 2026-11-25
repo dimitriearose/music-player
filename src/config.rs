@@ -28,6 +28,10 @@ pub struct Config {
     /// Playlist names pinned to the top of the Playlists tab, in order.
     pub favorites: Vec<String>,
     pub show_art: bool,
+    /// Show the next song under the status line (when it's known).
+    pub show_next: bool,
+    /// Colour the progress bar from the album art.
+    pub art_color: bool,
     pub seek_seconds: u32,
     pub volume_step: u32,
 }
@@ -37,6 +41,8 @@ impl Default for Config {
         Config {
             favorites: Vec::new(),
             show_art: true,
+            show_next: true,
+            art_color: true,
             seek_seconds: 5,
             volume_step: 5,
         }
@@ -108,11 +114,17 @@ fn build(file: Option<&str>, env: impl Fn(&str) -> Option<String>) -> (Config, V
             .filter(|name| !name.is_empty())
             .collect();
     }
-    if let Some(v) = env("AM_SHOW_ART") {
-        match v.trim().to_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => config.show_art = true,
-            "0" | "false" | "no" | "off" => config.show_art = false,
-            _ => problems.push(format!("AM_SHOW_ART={v} isn't true/false")),
+    for (name, field) in [
+        ("AM_SHOW_ART", &mut config.show_art),
+        ("AM_SHOW_NEXT", &mut config.show_next),
+        ("AM_ART_COLOR", &mut config.art_color),
+    ] {
+        if let Some(v) = env(name) {
+            match v.trim().to_lowercase().as_str() {
+                "1" | "true" | "yes" | "on" => *field = true,
+                "0" | "false" | "no" | "off" => *field = false,
+                _ => problems.push(format!("{name}={v} isn't true/false")),
+            }
         }
     }
     for (name, field) in [
@@ -163,6 +175,8 @@ pub fn print() {
     let c = &loaded.config;
     println!("  favorites    = {:?}", c.favorites);
     println!("  show_art     = {}", c.show_art);
+    println!("  show_next    = {}", c.show_next);
+    println!("  art_color    = {}", c.art_color);
     println!("  seek_seconds = {}", c.seek_seconds);
     println!("  volume_step  = {}", c.volume_step);
     for p in &loaded.problems {

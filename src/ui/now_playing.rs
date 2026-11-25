@@ -68,6 +68,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         status.repeat,
         app.sleep_label(now),
     ));
+    if let Some(next) = app.next_up() {
+        lines.push(Line::styled(format!("next  {}", artist_title(next)), DIM));
+    }
 
     // Album art goes on top, but only if the window is tall enough for it
     // *and* the text; otherwise the text wins and the art is skipped.
@@ -99,6 +102,15 @@ fn art_lines(art: &Art, truecolor: bool) -> Vec<Line<'static>> {
             Line::from(spans)
         })
         .collect()
+}
+
+/// "Title · Artist" for the next-up line.
+fn artist_title(song: &crate::music::Song) -> String {
+    if song.artist.is_empty() {
+        song.name.clone()
+    } else {
+        format!("{} · {}", song.name, song.artist)
+    }
 }
 
 /// "Artist — Album", leaving out whichever part is empty.

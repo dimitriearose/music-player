@@ -268,6 +268,8 @@ impl Worker {
         }
         self.art_track = track_id.clone();
         let Some(track_id) = track_id else { return };
+        // A new song: re-read the queue too, for the "next" line.
+        self.send_queue();
         let art = self.fetch_art();
         self.send(Update::Art { track_id, art });
     }

@@ -81,6 +81,9 @@ pub struct App {
     pub favorites: Vec<String>,
     /// The sleep timer, if one is set.
     pub sleep: Option<Sleep>,
+    /// Settings: show the next song / colour the bar from the art.
+    pub show_next: bool,
+    pub art_color: bool,
 }
 
 impl App {
@@ -108,6 +111,8 @@ impl App {
             volume_step: 5,
             favorites: Vec::new(),
             sleep: None,
+            show_next: true,
+            art_color: true,
         }
     }
 
@@ -139,6 +144,8 @@ impl App {
     pub fn use_config(&mut self, loaded: &crate::config::Loaded, now: Instant) {
         let c = &loaded.config;
         self.show_art = c.show_art;
+        self.show_next = c.show_next;
+        self.art_color = c.art_color;
         self.seek_step = c.seek_seconds as i32;
         self.volume_step = c.volume_step as i32;
         self.favorites = c.favorites.clone();
@@ -694,6 +701,32 @@ impl App {
     ///
     /// Rust note: the return type `Option<&str>` borrows the text from `self`
     /// instead of copying it. The compiler checks the borrow can't outlive `App`.
+    /// The song after this one, if we can be sure what it is: only while
+    /// playing from `am`'s queue, with Music's own shuffle off (Music picks
+    /// its own order then) and not repeating one song.
+    pub fn next_up(&self) -> Option<&Song> {
+        if !self.show_next {
+            return None;
+        }
+        let status = self.status.as_ref()?;
+        let track = status.track.as_ref()?;
+        if status.shuffle || status.repeat == Repeat::One {
+            return None;
+        }
+        let queue = self.queue.as_ref()?;
+        // The queue we hold must be about the song that's playing now.
+        if queue.current_id.as_deref() != Some(track.id.as_str()) {
+            return None;
+        }
+        let i = queue.current_index()?;
+        match queue.songs.get(i + 1) {
+            Some(song) => Some(song),
+            // Last song: with repeat all, the queue starts over.
+            None if status.repeat == Repeat::All => queue.songs.first(),
+            None => None,
+        }
+    }
+
     pub fn message(&self, now: Instant) -> Option<&str> {
         match &self.message {
             Some((text, at)) if now.duration_since(*at) < MESSAGE_TTL => Some(text),
@@ -1160,6 +1193,8 @@ mod tests {
             config: crate::config::Config {
                 favorites: vec![],
                 show_art: false,
+                show_next: true,
+                art_color: true,
                 seek_seconds: 15,
                 volume_step: 10,
             },
@@ -1303,6 +1338,44 @@ mod tests {
         app.handle_key(key('P'), now);
         assert_eq!(app.handle_key(KeyEvent::from(KeyCode::Esc), now), None);
         assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn next_up_only_when_we_know_it() {
+        let now = Instant::now();
+        let mut app = app_with_library(now);
+        let songs = app.library.as_ref().unwrap().songs.clone(); // A1, B2
+        // Playing the test song "X" from the queue, then A1 and B2.
+        let mut x = songs[0].clone();
+        x.id = "X".into();
+        app.apply(
+            Update::Queue(QueueInfo {
+                active: true,
+                current_id: Some("X".into()),
+                songs: vec![x, songs[0].clone(), songs[1].clone()],
+            }),
+            now,
+        );
+        assert_eq!(app.next_up().map(|s| s.id.as_str()), Some("A1"));
+
+        // Music's own shuffle picks its own order: don't guess.
+        app.status.as_mut().unwrap().shuffle = true;
+        assert_eq!(app.next_up(), None);
+        app.status.as_mut().unwrap().shuffle = false;
+
+        // Repeat one: the "next" song is this one again, so say nothing.
+        app.status.as_mut().unwrap().repeat = Repeat::One;
+        assert_eq!(app.next_up(), None);
+        app.status.as_mut().unwrap().repeat = Repeat::Off;
+
+        // Not playing from the queue: nothing.
+        app.queue.as_mut().unwrap().active = false;
+        assert_eq!(app.next_up(), None);
+        app.queue.as_mut().unwrap().active = true;
+
+        // Switched off in settings.
+        app.show_next = false;
+        assert_eq!(app.next_up(), None);
     }
 
     #[test]

@@ -21,6 +21,16 @@ favorites = ["Morning Run", "Focus"]
 # Env: AM_SHOW_ART=false
 show_art = true
 
+# Show the next song, faintly, under the status line. Only when it's
+# certain: playing from am's queue (songs started from the pop-up, or S),
+# with Music's own shuffle off.
+# Env: AM_SHOW_NEXT=false
+show_next = true
+
+# Colour the progress bar with the album art's main colour.
+# Env: AM_ART_COLOR=false
+art_color = true
+
 # Seconds jumped by ← / → (1–60).
 # Env: AM_SEEK_SECONDS=10
 seek_seconds = 5
