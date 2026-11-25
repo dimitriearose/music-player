@@ -193,7 +193,7 @@ pub fn playlist_ref(id: &str) -> String {
     format!("(first playlist whose persistent ID is {})", quote(id))
 }
 
-/// Wait (up to 5 s) until Music is really playing *from `target`* (an
+/// Wait (up to 10 s) until Music is really playing *from `target`* (an
 /// AppleScript variable holding a playlist), then a moment more.
 ///
 /// Found by testing: commands sent before playback is under way are silently
@@ -202,9 +202,12 @@ pub fn playlist_ref(id: &str) -> String {
 /// `play`, Music keeps playing the *old* song for up to a second (longer
 /// with Bluetooth headphones), so "is it playing?" alone answers yes too
 /// early. That's why we `stop` first and also check *which* playlist plays.
+/// Found later still: from cold (Music idle a while, Bluetooth headphones
+/// asleep) the first song can take over 5 s to start, hence 10 s. The loop
+/// ends as soon as playback starts, so the longer limit costs nothing.
 fn wait_for_playback(target: &str) -> String {
     format!(
-        "    repeat 50 times
+        "    repeat 100 times
         try
             if player state is playing and (persistent ID of current playlist) is (persistent ID of {target}) then exit repeat
         end try
