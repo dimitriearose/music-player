@@ -243,6 +243,7 @@ mod tests {
                 id: "P1".into(),
                 name: "Morning Run".into(),
                 apple_music: false,
+                editable: false,
             }],
         )
     }
@@ -261,6 +262,7 @@ mod tests {
             id: "1".into(),
             name: name.into(),
             apple_music,
+            editable: false,
         };
         let lib = Library::new(
             vec![],
@@ -281,6 +283,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             apple_music,
+            editable: false,
         };
         let mut lib = Library::new(
             vec![],

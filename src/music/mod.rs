@@ -96,6 +96,8 @@ pub struct Playlist {
     /// `true` for an Apple Music playlist you've added to your library
     /// (Music calls these "subscription playlists"), `false` for one you made.
     pub apple_music: bool,
+    /// Can songs be added to it? Only your own, non-smart playlists.
+    pub editable: bool,
 }
 
 /// An AirPlay output (your Mac's speakers count as one too).

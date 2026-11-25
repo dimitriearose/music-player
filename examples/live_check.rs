@@ -302,6 +302,26 @@ fn main() {
         status(&m).state == PlayState::Paused,
     );
 
+    // Add the current song to a temporary playlist of our own (the `P` key),
+    // twice: the second time it must not be added again. Then delete it.
+    let tmp = music::osascript::run(
+        "tell application \"Music\" to get persistent ID of (make new user playlist with properties {name:\"am live check (temporary)\"})",
+    )
+    .unwrap();
+    let first = m.add_current_to(&tmp).unwrap();
+    let second = m.add_current_to(&tmp).unwrap();
+    let count = music::osascript::run(&format!(
+        "tell application \"Music\" to count tracks of (first playlist whose persistent ID is \"{tmp}\")"
+    ))
+    .unwrap();
+    let _ = music::osascript::run(&format!(
+        "tell application \"Music\" to delete (first playlist whose persistent ID is \"{tmp}\")"
+    ));
+    check(
+        "add current song to a playlist, once only",
+        first && !second && count == "1",
+    );
+
     let path = std::env::temp_dir().join("am-live-art");
     let saved = m.save_artwork(&path.to_string_lossy()).unwrap();
     let decoded = saved && art::decode(&std::fs::read(&path).unwrap(), 20).is_some();

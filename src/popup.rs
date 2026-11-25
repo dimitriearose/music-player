@@ -65,7 +65,14 @@ pub enum View {
     List,
     Album(AlbumKey),
     Artist(String),
-    Playlist { id: String, name: String },
+    Playlist {
+        id: String,
+        name: String,
+    },
+    /// Pick a playlist to add the current song (called `song`) to (`P`).
+    AddTo {
+        song: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,6 +108,7 @@ impl Popup {
             View::Album(a) => Some(format!("{} — {}", a.title, a.artist)),
             View::Artist(name) => Some(name.clone()),
             View::Playlist { name, .. } => Some(name.clone()),
+            View::AddTo { song } => Some(format!("Add “{song}” to…")),
         }
     }
 }
@@ -122,6 +130,11 @@ pub enum Action {
     ToggleSpeaker {
         name: String,
         on: bool,
+    },
+    /// Add the song that's playing to this playlist.
+    AddCurrentTo {
+        id: String,
+        name: String,
     },
     Nothing,
 }
@@ -204,6 +217,7 @@ pub fn rows(popup: &Popup, data: &Data) -> Vec<Row> {
             Some(songs) => playlist_rows(id, songs),
             None => vec![Row::message("Loading…")],
         },
+        View::AddTo { .. } => add_to_rows(lib),
         View::List => match popup.tab {
             Tab::Search => search_rows(lib, &popup.query),
             Tab::Playlists => lib
@@ -244,6 +258,38 @@ fn song_rows(songs: &[Song], detail: impl Fn(&Song) -> String) -> Vec<Row> {
             current: false,
         })
         .collect()
+}
+
+/// The playlists you can add a song to: your own, non-smart ones, with
+/// favorites first (the library keeps them in that order).
+fn add_to_rows(lib: &Library) -> Vec<Row> {
+    let rows: Vec<Row> = lib
+        .playlists
+        .iter()
+        .filter(|p| p.editable)
+        .map(|p| Row {
+            icon: if lib.favorite_number(&p.id).is_some() {
+                ICON_FAVORITE
+            } else {
+                ICON_PLAYLIST
+            },
+            label: p.name.clone(),
+            detail: String::new(),
+            action: Action::AddCurrentTo {
+                id: p.id.clone(),
+                name: p.name.clone(),
+            },
+            queue: Queueable::Nothing,
+            current: false,
+        })
+        .collect();
+    if rows.is_empty() {
+        vec![Row::message(
+            "No playlists of your own to add to (make one in Music)",
+        )]
+    } else {
+        rows
+    }
 }
 
 /// Songs inside a saved playlist: Enter plays the real playlist from there.
@@ -443,6 +489,7 @@ mod tests {
                 id: "P1".into(),
                 name: "Mix".into(),
                 apple_music: false,
+                editable: false,
             }],
         )
     }

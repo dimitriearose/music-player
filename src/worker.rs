@@ -82,6 +82,11 @@ pub enum Command {
     LoadQueue,
     /// Jump to song `index` (1 = first) of the queue.
     PlayQueueAt(usize),
+    /// Add the song that's playing to one of your playlists.
+    AddCurrentTo {
+        id: String,
+        name: String,
+    },
     LoadSpeakers,
     SetSpeaker {
         name: String,
@@ -364,6 +369,15 @@ impl Worker {
             Command::PlayQueueAt(index) => {
                 m.play_queue_at(index)?;
                 self.send_queue();
+                Ok(())
+            }
+            Command::AddCurrentTo { id, name } => {
+                let notice = if m.add_current_to(&id)? {
+                    format!("Added to {name}")
+                } else {
+                    format!("Already in {name}")
+                };
+                self.send(Update::Notice(notice));
                 Ok(())
             }
             Command::LoadSpeakers => {

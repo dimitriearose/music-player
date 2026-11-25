@@ -122,14 +122,18 @@ pub fn parse_playlists(raw: &str) -> Result<Vec<Playlist>, MusicError> {
     if raw.is_empty() || cols[0] == [""] {
         return Ok(Vec::new()); // no playlists at all
     }
-    if cols.len() != 3 || cols.iter().any(|c| c.len() != cols[0].len()) {
+    // Three lined-up columns (ID, name, kind), then a shorter list: the IDs
+    // of playlists you can add songs to.
+    if cols.len() != 4 || cols[..3].iter().any(|c| c.len() != cols[0].len()) {
         return Err(MusicError::BadOutput(preview(raw)));
     }
+    let editable = &cols[3];
     Ok((0..cols[0].len())
         .map(|i| Playlist {
             id: cols[0][i].to_string(),
             name: cols[1][i].to_string(),
             apple_music: cols[2][i] == "subscription playlist",
+            editable: editable.contains(&cols[0][i]),
         })
         .collect())
 }
@@ -340,19 +344,22 @@ mod tests {
             &["P1", "P2"],
             &["Running", "Favorite Songs"],
             &["user playlist", "subscription playlist"],
+            &["P1"], // only P1 can take songs
         ]);
         let lists = parse_playlists(&raw).unwrap();
         assert!(!lists[0].apple_music);
+        assert!(lists[0].editable);
         assert_eq!(
             lists[1],
             Playlist {
                 id: "P2".into(),
                 name: "Favorite Songs".into(),
                 apple_music: true,
+                editable: false,
             }
         );
         assert_eq!(
-            parse_playlists(&columns(&[&[""], &[""], &[""]])).unwrap(),
+            parse_playlists(&columns(&[&[""], &[""], &[""], &[""]])).unwrap(),
             vec![]
         );
         assert!(parse_playlists(&columns(&[&["P1"], &["only two columns"]])).is_err());

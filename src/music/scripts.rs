@@ -175,13 +175,16 @@ tell application "Music"
     set plIds to persistent ID of every playlist whose special kind is none
     set plNames to name of every playlist whose special kind is none
     set plKinds to class of every playlist whose special kind is none
+    -- Playlists you can add songs to (a separate, shorter list of IDs).
+    set plEditable to persistent ID of every user playlist whose smart is false
 end tell
 set AppleScript's text item delimiters to US
 set a to plIds as text
 set b to plNames as text
 set c to plKinds as text
+set d to plEditable as text
 set AppleScript's text item delimiters to RS
-return {a, b, c} as text
+return {a, b, c, d} as text
 "#;
 
 /// AppleScript for "the playlist with this persistent ID".
@@ -218,6 +221,24 @@ fn wait_for_playback(target: &str) -> String {
 /// *outside* the playlist, so "next" then wanders off elsewhere. Playing the
 /// playlist itself keeps "next" inside it. So we start the playlist and
 /// skip forward once playback has really started (`wait_for_playback`).
+/// Copy the current song into one of your playlists, unless it's already
+/// there. Prints `ADDED` or `ALREADY`. (Copying works even for Apple Music
+/// songs that aren't in your library; see `QUEUE_APPEND`.)
+pub fn add_current_to(id: &str) -> String {
+    format!(
+        r#"tell application "Music"
+    set p to {}
+    set t to current track
+    set tid to persistent ID of t
+    if (count of (every track of p whose persistent ID is tid)) > 0 then return "ALREADY"
+    duplicate t to p
+    return "ADDED"
+end tell
+"#,
+        playlist_ref(id)
+    )
+}
+
 pub fn play_playlist_at(id: &str, index: usize) -> String {
     let mut s = format!(
         "tell application \"Music\"\n    set playTarget to {}\n    stop\n    play playTarget\n",

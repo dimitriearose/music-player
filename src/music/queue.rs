@@ -82,6 +82,13 @@ impl Music {
         ))?)
     }
 
+    /// Add the song that's playing to playlist `id`. Returns `false` if it
+    /// was already there (we don't add it twice).
+    pub fn add_current_to(&self, id: &str) -> Result<bool, MusicError> {
+        check_ids(&[id.to_string()])?;
+        Ok(osascript::run(&scripts::add_current_to(id))? == "ADDED")
+    }
+
     /// Play a saved playlist starting at `index` (1 = first song).
     pub fn play_playlist(&self, id: &str, index: usize) -> Result<(), MusicError> {
         check_ids(&[id.to_string()])?;

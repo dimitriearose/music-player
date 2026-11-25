@@ -272,6 +272,26 @@ impl App {
                 self.cycle_sleep(now);
                 return None;
             }
+            // Shift-P: add the song that's playing to one of your playlists.
+            KeyCode::Char('P') if self.connection == Connection::Connected => {
+                let song = self
+                    .status
+                    .as_ref()
+                    .and_then(|s| s.track.as_ref())
+                    .map(|t| t.name.clone());
+                match song {
+                    Some(song) => {
+                        self.show_help = false;
+                        self.popup = Some(Popup {
+                            tab: Tab::Playlists,
+                            view: View::AddTo { song },
+                            ..Popup::new()
+                        });
+                    }
+                    None => self.notice("Nothing playing to add", now),
+                }
+                return None;
+            }
             KeyCode::Char('q') => {
                 self.should_quit = true;
                 return None;
@@ -503,7 +523,9 @@ impl App {
                 View::Album(k) => Queueable::Album(k.clone()),
                 View::Artist(name) => Queueable::Artist(name.clone()),
                 View::Playlist { id, .. } => Queueable::Playlist(id.clone()),
-                View::List => row.map(|r| r.queue).unwrap_or(Queueable::Nothing),
+                View::List | View::AddTo { .. } => {
+                    row.map(|r| r.queue).unwrap_or(Queueable::Nothing)
+                }
             };
             let source = match &target {
                 Queueable::Playlist(id) => Some(id.clone()),
@@ -533,7 +555,9 @@ impl App {
         match key.code {
             KeyCode::Char('r') if ctrl => return Some(Command::LoadLibrary),
             KeyCode::Esc => {
-                if p.view == View::List {
+                // The add-to list was opened straight from the main screen,
+                // so "back" means closing it.
+                if p.view == View::List || matches!(p.view, View::AddTo { .. }) {
                     self.popup = None;
                 } else {
                     p.view = View::List;
@@ -617,6 +641,12 @@ impl App {
             }
             // Speakers stay open, so you can switch several on or off.
             Action::ToggleSpeaker { name, on } => Some(Command::SetSpeaker { name, on }),
+            Action::AddCurrentTo { id, name } => {
+                self.popup = None;
+                // Our copy of that playlist's songs is now out of date.
+                self.playlist_songs.remove(&id);
+                Some(Command::AddCurrentTo { id, name })
+            }
             Action::Nothing => None,
         }
     }
@@ -1044,6 +1074,7 @@ mod tests {
             id: "P9".into(),
             name: "Mix".into(),
             apple_music: true,
+            editable: false,
         };
         app.apply(Update::Library(Library::new(vec![], vec![playlist])), now);
         app.popup = Some(Popup {
@@ -1084,6 +1115,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             apple_music: false,
+            editable: false,
         };
         app.apply(
             Update::Library(Library::new(
@@ -1198,7 +1230,10 @@ mod tests {
         let mut app = connected_app(now);
         app.sleep = Some(Sleep::At(now + Duration::from_secs(60)));
         assert_eq!(app.tick(now + Duration::from_secs(59)), None);
-        assert_eq!(app.tick(now + Duration::from_secs(60)), Some(Command::Pause));
+        assert_eq!(
+            app.tick(now + Duration::from_secs(60)),
+            Some(Command::Pause)
+        );
         assert_eq!(app.status.as_ref().unwrap().state, PlayState::Paused);
         assert_eq!(app.sleep, None);
         assert_eq!(app.tick(now + Duration::from_secs(61)), None);
@@ -1212,7 +1247,10 @@ mod tests {
         // The test song is 100 s long and starts at 0 s, so its last second
         // starts 99 s from now.
         assert_eq!(app.tick(now + Duration::from_secs(98)), None);
-        assert_eq!(app.tick(now + Duration::from_secs(99)), Some(Command::Pause));
+        assert_eq!(
+            app.tick(now + Duration::from_secs(99)),
+            Some(Command::Pause)
+        );
 
         // If a new song shows up first, pause then.
         let mut app = connected_app(now);
@@ -1229,6 +1267,42 @@ mod tests {
         app.sleep = Some(Sleep::At(now));
         assert_eq!(app.tick(now), None);
         assert_eq!(app.sleep, None, "timer is used up either way");
+    }
+
+    #[test]
+    fn capital_p_adds_the_song_to_one_of_your_own_playlists() {
+        let now = Instant::now();
+        let mut app = connected_app(now);
+        let p = |id: &str, name: &str, editable: bool| crate::music::Playlist {
+            id: id.into(),
+            name: name.into(),
+            apple_music: !editable,
+            editable,
+        };
+        app.apply(
+            Update::Library(Library::new(
+                vec![],
+                vec![p("A1", "Apple Mix", false), p("E2", "ease", true)],
+            )),
+            now,
+        );
+        app.handle_key(key('P'), now);
+        let rows = popup::rows(app.popup.as_ref().unwrap(), &app.data());
+        let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(labels, ["ease"], "only playlists that can take songs");
+        assert_eq!(
+            app.handle_key(KeyEvent::from(KeyCode::Enter), now),
+            Some(Command::AddCurrentTo {
+                id: "E2".into(),
+                name: "ease".into()
+            })
+        );
+        assert!(app.popup.is_none());
+
+        // Esc closes it without adding anything.
+        app.handle_key(key('P'), now);
+        assert_eq!(app.handle_key(KeyEvent::from(KeyCode::Esc), now), None);
+        assert!(app.popup.is_none());
     }
 
     #[test]

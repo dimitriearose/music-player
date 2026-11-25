@@ -19,6 +19,7 @@ const KEYS: &[(&str, &str)] = &[
     ("s", "Music's shuffle on / off"),
     ("r", "repeat: off → all → one"),
     ("L", "♥ love / unlove this song"),
+    ("P", "add this song to one of your playlists"),
     ("z", "sleep: end of song → 15 → 30 → 60 min → off"),
     ("1–9", "play a favorite playlist"),
     ("/", "library: search, browse, queue, speakers"),
