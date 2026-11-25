@@ -48,6 +48,8 @@ end tell
 "#;
 
 pub const PLAY_PAUSE: &str = r#"tell application "Music" to playpause"#;
+/// Pause only (never starts playback), for the sleep timer.
+pub const PAUSE: &str = r#"tell application "Music" to pause"#;
 pub const NEXT: &str = r#"tell application "Music" to next track"#;
 pub const PREVIOUS: &str = r#"tell application "Music" to previous track"#;
 

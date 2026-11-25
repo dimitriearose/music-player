@@ -35,6 +35,8 @@ const LAUNCH_GRACE: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     PlayPause,
+    /// Pause (and only pause): what the sleep timer sends.
+    Pause,
     Next,
     Previous,
     /// Jump forwards/backwards by this many seconds.
@@ -289,6 +291,7 @@ impl Worker {
         let m = &self.music;
         match cmd {
             Command::PlayPause => m.play_pause(),
+            Command::Pause => m.pause(),
             Command::Next => m.next(),
             Command::Previous => m.previous(),
             Command::Seek(seconds) => m.seek_by(seconds),

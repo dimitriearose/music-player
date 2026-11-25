@@ -18,6 +18,18 @@ const MESSAGE_TTL: Duration = Duration::from_secs(4);
 /// After this long with no reply, hint that a permission prompt may be waiting.
 const SLOW_START: Duration = Duration::from_secs(2);
 
+/// The sleep timer (the `z` key): when to pause the music.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Sleep {
+    /// When this song (by ID) finishes.
+    EndOfSong(String),
+    /// At this moment.
+    At(Instant),
+}
+
+/// What `z` steps through after "end of this song", in minutes.
+const SLEEP_MINUTES: [u64; 3] = [15, 30, 60];
+
 /// Are we talking to Music.app, and if not, why not?
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Connection {
@@ -67,6 +79,8 @@ pub struct App {
     pub volume_step: i32,
     /// Playlist names to pin to the top (settings: `favorites`).
     pub favorites: Vec<String>,
+    /// The sleep timer, if one is set.
+    pub sleep: Option<Sleep>,
 }
 
 impl App {
@@ -93,6 +107,7 @@ impl App {
             seek_step: 5,
             volume_step: 5,
             favorites: Vec::new(),
+            sleep: None,
         }
     }
 
@@ -148,6 +163,86 @@ impl App {
         Some(cmd)
     }
 
+    /// Called every frame: is it time for the sleep timer to pause?
+    pub fn tick(&mut self, now: Instant) -> Option<Command> {
+        if self.connection != Connection::Connected {
+            return None;
+        }
+        let status = self.status.as_ref()?;
+        let due = match self.sleep.as_ref()? {
+            Sleep::At(t) => now >= *t,
+            Sleep::EndOfSong(id) => match &status.track {
+                // A different song (or none) means ours has finished.
+                Some(t) if &t.id == id => {
+                    // Pause in the song's last second, so the next one
+                    // doesn't start playing first.
+                    status.state == PlayState::Playing && self.position(now) >= t.duration - 1.0
+                }
+                _ => true,
+            },
+        };
+        if !due {
+            return None;
+        }
+        // Copy out what we need before changing `self` (Rust won't let us
+        // change `self` while `status` still borrows part of it).
+        let playing = status.state == PlayState::Playing;
+        self.sleep = None;
+        self.notice("Sleep timer: paused", now);
+        if !playing {
+            return None; // already quiet
+        }
+        let cmd = Command::Pause;
+        self.predict(&cmd, now);
+        self.sent += 1;
+        Some(cmd)
+    }
+
+    /// `z`: off → end of this song → 15 → 30 → 60 min → off.
+    fn cycle_sleep(&mut self, now: Instant) {
+        let minutes_left = |t: &Instant| t.saturating_duration_since(now).as_secs().div_ceil(60);
+        let track_id = self
+            .status
+            .as_ref()
+            .and_then(|s| s.track.as_ref())
+            .map(|t| t.id.clone());
+        self.sleep = match (&self.sleep, track_id) {
+            (None, Some(id)) => Some(Sleep::EndOfSong(id)),
+            (None, None) | (Some(Sleep::EndOfSong(_)), _) => {
+                Some(self.sleep_in(SLEEP_MINUTES[0], now))
+            }
+            (Some(Sleep::At(t)), _) => {
+                // The next step up from what's left, or off after the last.
+                let left = minutes_left(t);
+                SLEEP_MINUTES
+                    .iter()
+                    .find(|&&m| m > left)
+                    .map(|&m| self.sleep_in(m, now))
+            }
+        };
+        let text = match &self.sleep {
+            None => "Sleep timer off".to_string(),
+            Some(Sleep::EndOfSong(_)) => "Pausing after this song".to_string(),
+            Some(Sleep::At(t)) => format!("Pausing in {} min", minutes_left(t)),
+        };
+        self.notice(&text, now);
+    }
+
+    fn sleep_in(&self, minutes: u64, now: Instant) -> Sleep {
+        Sleep::At(now + Duration::from_secs(minutes * 60))
+    }
+
+    /// The sleep timer for the status line: "☾ end of song", "☾ 12m".
+    pub fn sleep_label(&self, now: Instant) -> Option<String> {
+        Some(match self.sleep.as_ref()? {
+            Sleep::EndOfSong(_) => "☾ end of song".to_string(),
+            Sleep::At(t) => format!(
+                "☾ {}m",
+                t.saturating_duration_since(now).as_secs().div_ceil(60)
+            ),
+        })
+    }
+
     /// The key → command table. Keys that only change the screen (like `?`)
     /// are handled here too and return `None`.
     fn command_for(&mut self, key: KeyEvent, now: Instant) -> Option<Command> {
@@ -171,6 +266,10 @@ impl App {
             }
             KeyCode::Char('a') => {
                 self.show_art = !self.show_art;
+                return None;
+            }
+            KeyCode::Char('z') => {
+                self.cycle_sleep(now);
                 return None;
             }
             KeyCode::Char('q') => {
@@ -268,6 +367,11 @@ impl App {
         let duration = s.track.as_ref().map_or(f64::MAX, |t| t.duration);
 
         match cmd {
+            Command::Pause => {
+                s.position = pos;
+                self.status_at = now;
+                s.state = PlayState::Paused;
+            }
             Command::PlayPause => {
                 s.position = pos; // freeze the bar exactly where it is
                 self.status_at = now;
@@ -1046,9 +1150,85 @@ mod tests {
         let now = Instant::now();
         let mut app = connected_app(now);
         assert_eq!(app.handle_key(key('L'), now), Some(Command::ToggleFavorite));
-        assert!(app.status.as_ref().unwrap().track.as_ref().unwrap().favorited);
+        assert!(
+            app.status
+                .as_ref()
+                .unwrap()
+                .track
+                .as_ref()
+                .unwrap()
+                .favorited
+        );
         app.handle_key(key('L'), now);
-        assert!(!app.status.as_ref().unwrap().track.as_ref().unwrap().favorited);
+        assert!(
+            !app.status
+                .as_ref()
+                .unwrap()
+                .track
+                .as_ref()
+                .unwrap()
+                .favorited
+        );
+    }
+
+    #[test]
+    fn z_cycles_the_sleep_timer() {
+        let now = Instant::now();
+        let mut app = connected_app(now);
+        let mut labels = Vec::new();
+        for _ in 0..5 {
+            app.handle_key(key('z'), now);
+            labels.push(app.sleep_label(now));
+        }
+        assert_eq!(
+            labels,
+            [
+                Some("☾ end of song".to_string()),
+                Some("☾ 15m".to_string()),
+                Some("☾ 30m".to_string()),
+                Some("☾ 60m".to_string()),
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn sleep_timer_pauses_when_time_is_up_and_only_once() {
+        let now = Instant::now();
+        let mut app = connected_app(now);
+        app.sleep = Some(Sleep::At(now + Duration::from_secs(60)));
+        assert_eq!(app.tick(now + Duration::from_secs(59)), None);
+        assert_eq!(app.tick(now + Duration::from_secs(60)), Some(Command::Pause));
+        assert_eq!(app.status.as_ref().unwrap().state, PlayState::Paused);
+        assert_eq!(app.sleep, None);
+        assert_eq!(app.tick(now + Duration::from_secs(61)), None);
+    }
+
+    #[test]
+    fn end_of_song_pauses_in_the_last_second_or_on_a_new_song() {
+        let now = Instant::now();
+        let mut app = connected_app(now);
+        app.handle_key(key('z'), now); // end of this song
+        // The test song is 100 s long and starts at 0 s, so its last second
+        // starts 99 s from now.
+        assert_eq!(app.tick(now + Duration::from_secs(98)), None);
+        assert_eq!(app.tick(now + Duration::from_secs(99)), Some(Command::Pause));
+
+        // If a new song shows up first, pause then.
+        let mut app = connected_app(now);
+        app.handle_key(key('z'), now);
+        app.status.as_mut().unwrap().track.as_mut().unwrap().id = "OTHER".into();
+        assert_eq!(app.tick(now), Some(Command::Pause));
+    }
+
+    #[test]
+    fn sleep_timer_does_nothing_if_already_paused() {
+        let now = Instant::now();
+        let mut app = connected_app(now);
+        app.status.as_mut().unwrap().state = PlayState::Paused;
+        app.sleep = Some(Sleep::At(now));
+        assert_eq!(app.tick(now), None);
+        assert_eq!(app.sleep, None, "timer is used up either way");
     }
 
     #[test]

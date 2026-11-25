@@ -186,6 +186,10 @@ impl Music {
         parse::parse_status(&raw)
     }
 
+    pub fn pause(&self) -> Result<(), MusicError> {
+        osascript::run(scripts::PAUSE).map(|_| ())
+    }
+
     pub fn play_pause(&self) -> Result<(), MusicError> {
         osascript::run(scripts::PLAY_PAUSE).map(|_| ())
     }

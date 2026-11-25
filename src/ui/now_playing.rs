@@ -66,6 +66,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, now: Instant) {
         status.shuffle,
         status.queue_shuffled,
         status.repeat,
+        app.sleep_label(now),
     ));
 
     // Album art goes on top, but only if the window is tall enough for it
@@ -130,6 +131,7 @@ fn state_line(
     shuffle: bool,
     queue_shuffled: bool,
     repeat: Repeat,
+    sleep: Option<String>,
 ) -> Line<'static> {
     let state = match state {
         PlayState::Playing => "▶ playing",
@@ -148,6 +150,7 @@ fn state_line(
         Repeat::One => parts.push("↻ one".into()),
         Repeat::All => parts.push("↻ all".into()),
     }
+    parts.extend(sleep); // adds the sleep label if there is one
     Line::styled(parts.join("   "), DIM)
 }
 
@@ -187,11 +190,19 @@ mod tests {
 
     #[test]
     fn state_line_hides_settings_that_are_off() {
-        let quiet = state_line(PlayState::Paused, 40, false, false, Repeat::Off).to_string();
+        let quiet = state_line(PlayState::Paused, 40, false, false, Repeat::Off, None).to_string();
         assert_eq!(quiet, "⏸ paused   vol 40");
-        let busy = state_line(PlayState::Playing, 60, true, false, Repeat::All).to_string();
-        assert_eq!(busy, "▶ playing   vol 60   ⤮ shuffle   ↻ all");
-        let ours = state_line(PlayState::Playing, 60, false, true, Repeat::Off).to_string();
+        let busy = state_line(
+            PlayState::Playing,
+            60,
+            true,
+            false,
+            Repeat::All,
+            Some("☾ 5m".into()),
+        )
+        .to_string();
+        assert_eq!(busy, "▶ playing   vol 60   ⤮ shuffle   ↻ all   ☾ 5m");
+        let ours = state_line(PlayState::Playing, 60, false, true, Repeat::Off, None).to_string();
         assert_eq!(ours, "▶ playing   vol 60   ⤮ shuffled queue");
     }
 }

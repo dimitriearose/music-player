@@ -83,11 +83,16 @@ fn run(
             app.apply(update, Instant::now());
         }
 
-        // 2. Draw the screen.
+        // 2. The sleep timer may want to pause the music.
+        if let Some(cmd) = app.tick(Instant::now()) {
+            let _ = commands.send(cmd);
+        }
+
+        // 3. Draw the screen.
         let now = Instant::now();
         terminal.draw(|frame| ui::draw(frame, &app, now))?;
 
-        // 3. Wait up to one TICK for input.
+        // 4. Wait up to one TICK for input.
         if event::poll(TICK)? {
             // Only react to key *presses* (not releases or repeats-as-release).
             if let Event::Key(key) = event::read()?
