@@ -11,15 +11,18 @@ clutter.
 
         1:42 ━━━━━━━━━━━━━━━━──────────────── 4:36
 
-               ▶ playing   vol 60   ⤮ shuffle
+               ▶ playing   vol 60   ⤮ shuffle   ☾ 25m
+                 next  Another Song · Some Band
 ```
 
-**Status:** all six milestones are done:
-- now playing, with album art;
+**What it does:**
+- now playing, with album art and a progress bar tinted to match it;
 - playback controls, seek, volume, shuffle and repeat;
-- library search and browsing;
-- a queue ("play next" / "add to queue");
-- AirPlay speakers.
+- library search and browsing, with favorite playlists on keys `1`–`9`;
+- a queue ("play next" / "add to queue") and its own shuffle (`S`);
+- ♥ songs (`L`), add a song to a playlist (`P`), a sleep timer (`z`);
+- AirPlay speakers;
+- a one-line view when the window is short.
 
 See [DESIGN.md](DESIGN.md) for how it's built.
 
@@ -158,6 +161,9 @@ can press `o` to reopen it.
 | `S` (Shift-S) | **shuffle your whole library** (200 random songs). The status line shows `⤮ shuffled queue` |
 | `s` | Music's own shuffle on / off. The status line shows `⤮ shuffle` |
 | `r` | repeat: off → all → one → off |
+| `L` (Shift-L) | ♥ love the song (adds it to your Apple Music "Favorite Songs"), again to unlove |
+| `P` (Shift-P) | add the song to one of your playlists (a list opens; `Enter` picks, `Esc` cancels) |
+| `z` | sleep timer: pause after this song → in 15 → 30 → 60 min → off. Shown as `☾` |
 | `1`–`9` | play your 1st–9th favorite playlist (see [Settings](#settings-and-favorites)) |
 | `/` | open the library pop-up |
 | `a` | album art on / off |
@@ -220,6 +226,33 @@ and `a` hides it. Terminal.app uses 256 colours, so the art's colours are
 close but not exact. Terminals with full colour (iTerm2, Ghostty, kitty)
 show them exactly.
 
+The progress bar takes the cover's most vivid colour (turn this off with
+`art_color = false`).
+
+### Small windows
+
+When the window is too short for the full screen, `am` switches to one
+line, so it can live in a thin strip at the bottom of your screen:
+
+```
+▶ Let It Happen · Tame Impala ♥   1:11 / 7:46   ⤮   ☾ 12m
+```
+
+### The "next" line
+
+Under the status line, `am` shows the next song faintly, but only when it
+knows for certain: while playing from its queue (anything started from the
+pop-up, or `S`), with Music's own shuffle (`s`) off. Playing a playlist
+directly leaves Music in charge of the order, so the line stays hidden.
+`show_next = false` turns it off.
+
+### Speakers and your Mac's sound
+
+In the Speakers tab, your Mac's row says where its sound actually goes,
+e.g. "this Mac · plays through AirPods Pro". If you hear nothing, check
+that line first. To change it, use the sound icon in the menu bar (macOS
+doesn't let scripts switch it).
+
 ---
 
 ## Settings and favorites
@@ -241,6 +274,8 @@ open -e ~/.config/am/config.toml
 ```toml
 favorites = ["Morning Run", "Focus"]   # pinned to the top of Playlists, marked ★
 show_art = true                        # album art on when am starts
+show_next = true                       # faint "next" line under the status
+art_color = true                       # progress bar in the cover's colour
 seek_seconds = 5                       # ← / → jump
 volume_step = 5                        # + / - change
 ```
@@ -265,6 +300,8 @@ for a one-off try, or if you'd rather keep settings in `~/.zshrc`:
 | `AM_SHOW_ART` | `AM_SHOW_ART=false` |
 | `AM_SEEK_SECONDS` | `AM_SEEK_SECONDS=10` |
 | `AM_VOLUME_STEP` | `AM_VOLUME_STEP=10` |
+| `AM_SHOW_NEXT` | `AM_SHOW_NEXT=false` |
+| `AM_ART_COLOR` | `AM_ART_COLOR=false` |
 | `AM_CONFIG` | read the settings file from somewhere else |
 
 ```bash
@@ -335,7 +372,7 @@ src/
 ├── app.rs               the app's state + what each key does (has tests)
 ├── popup.rs             the library pop-up: tabs, rows, what Enter does (has tests)
 ├── library.rs           your library in memory + search (has tests)
-├── art.rs               album art → coloured text blocks (has tests)
+├── art.rs               album art → coloured text blocks, bar colour (has tests)
 ├── worker.rs            the background thread that talks to Music
 ├── check.rs             `am --check`
 ├── config.rs            settings file + AM_* environment variables (has tests)

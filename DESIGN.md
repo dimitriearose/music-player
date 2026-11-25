@@ -337,3 +337,14 @@ Measured on a 1,583-song library:
    mark is kept when songs are added to a shuffled queue. Found by testing:
    `set description of q to (description of old)` fails in one step, so the
    old value is read into a variable first.
+12. **Love, sleep, add-to-playlist (v0.2).** `favorited` is Music's name
+   for ♥ (older versions called it `loved`). The sleep timer lives in `am`
+   (Music has no timer) and sends a pause-only command in the song's last
+   second, so the next song never starts. Only your own, non-smart
+   playlists can take songs (`user playlist whose smart is false`; your
+   own "Favorite Songs" is smart), so `P` lists just those.
+13. **"Computer" isn't the speakers.** Music's Mac output plays through
+   whatever macOS's current output is (AirPods, in the owner's case,
+   which is why nothing was heard once). Scripts can't change it, but
+   `system_profiler SPAudioDataType` reveals it, so the Speakers tab names
+   it.
